@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orcaigui"
+dynamic = ["version"]
+authors = [
+    { name = "Daniel Angst", email = "daniel.angst@env.ethz.ch" },
+]
+description = "GUI for OrcAI, a tool for the classification of orca calls using machine learning."
+keywords = [
+    "Bioaccoustics",
+    "Orca",
+    "classification",
+]
+readme = "README.md"
+requires-python = "==3.11.*"
+license = "CC-BY-SA-4.0"
+license-files = ["LICENSE"]
+dependencies = [
+    "matplotlib>=3.10.3",
+    "orcai",
+    "pyqt6>=6.9.1",
+    "pyqtgraph",
+]
+[tool.setuptools.dynamic]
+version = {attr = "orcaigui.__version__"}
+
+[project.urls]
+Repository = "https://github.com/ethz-tb/orcai-gui"
+
+[project.scripts]
+orcai-gui = "orcaigui.cli:cli"
+orcui = "orcaigui.cli:cli"
+
+
+[tool.setuptools.package-data]
+"orcaigui.resources" = ["*.png"]
+
+[tool.uv.sources]
+pyqtgraph = { git = "https://github.com/pyqtgraph/pyqtgraph" }
+orcai = { git = "https://github.com/ethz-tb/orcAI" }
+
+[dependency-groups]
+dev = [
+    "dmgbuild>=1.6.5",
+    "ipython>=9.3.0",
+    "pyinstaller>=6.14.1",
+]
+
+[tool.uv]
+dependency-metadata = [
+    { name = "tensorrt"},
+]
