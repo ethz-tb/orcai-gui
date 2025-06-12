@@ -110,6 +110,7 @@ class AudioFileLoader(QRunnable):
         self.signals.progress.emit(f"Loaded file {self.file_path.name}")
         self.signals.result.emit(
             {
+                "file_path": self.file_path,
                 "spectrogram": spectrogram,
                 "frequencies": frequencies,
                 "times": times,

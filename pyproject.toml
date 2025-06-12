@@ -31,7 +31,7 @@ version = {attr = "orcaigui.__version__"}
 Repository = "https://github.com/ethz-tb/orcai-gui"
 
 [project.scripts]
-orcai-gui = "orcaigui.cli:cli"
+orcaigui = "orcaigui.cli:cli"
 orcui = "orcaigui.cli:cli"
 
 

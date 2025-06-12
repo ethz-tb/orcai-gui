@@ -13,3 +13,6 @@ build-dmg:
     uv run dmgbuild -s dmg_settings.py "orcAI" orcai.dmg
 
 build-all: build build-app build-dmg
+
+run:
+    uv run orcaigui

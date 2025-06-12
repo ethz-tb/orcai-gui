@@ -29,6 +29,15 @@ from orcaigui.io import AudioFileLoader
 from orcaigui.pgaxis import hhmmssAxisItem
 
 COLORMAPS = ["inferno", "viridis", "plasma", "magma", "cividis", "Greys"]
+N_RECENT_FILES = 5
+
+
+def _create_button_and_label(button_text, tooltip, callback, label="", col=0):
+    button = QPushButton(button_text)
+    button.setToolTip(tooltip)
+    button.clicked.connect(callback)
+    label = QLabel("", alignment=Qt.AlignmentFlag.AlignCenter)
+    return {"button": button, "label": label, "col": col}
 
 
 class MainWindow(QMainWindow):
@@ -85,10 +94,13 @@ class MainWindow(QMainWindow):
         # File menu
         self.file_menu = self.menu.addMenu("File")
 
-        self.open_action = QAction("Open Recording...", self)
+        self.open_action = QAction("Open", self)
         self.open_action.setShortcut(QKeySequence.StandardKey.Open)
         self.open_action.triggered.connect(self.open_file_dialog)
         self.file_menu.addAction(self.open_action)
+
+        self.recent_files_menu = self.file_menu.addMenu("Open recent")
+        self.update_open_recent_menu()
 
         self.file_menu.addSeparator()
 
@@ -103,20 +115,16 @@ class MainWindow(QMainWindow):
         self.file_menu.addAction(self.exit_action)
 
         # View Menu
-        self.view_menu = self.menu.addMenu("Spectrogram")
-        self.colormap_menu = self.view_menu.addMenu("Colormap")
-
-        # Options submenu
-        self.options_menu = self.menu.addMenu("Options")
+        self.spectrogram_menu = self.menu.addMenu("Spectrogram")
+        self.colormap_menu = self.spectrogram_menu.addMenu("Colormap")
 
         self.colormap_group = QActionGroup(self)
         self.colormap_group.setExclusive(True)
 
         for colormap in COLORMAPS:
-            action = QAction(colormap, self, checkable=True)
+            action = QAction(colormap, self.colormap_group, checkable=True)
             action.setData(colormap)
-            action.triggered.connect(lambda _, cmap=colormap: self.setColormap(cmap))
-            self.colormap_group.addAction(action)
+            action.triggered.connect(lambda cmap=colormap: self.setColormap(cmap))
             self.colormap_menu.addAction(action)
             if colormap == self.colormap:
                 action.setChecked(True)
@@ -244,38 +252,34 @@ class MainWindow(QMainWindow):
         self.legend = pg.LegendItem(colCount=self.shape["num_labels"])
         self.legend.setParentItem(self.legend_box)
         self.legend.anchor((0.5, 0.5), (0.5, 0.5))
+        self.legend.mouseDragEvent = lambda *args, **kwargs: None
+        self.legend.hoverEvent = lambda *args, **kwargs: None
+        # legend.sampleType.mouseClickEvent = lambda *args, **kwargs: None
         self.legend_box.setMaximumHeight(10)
         self.plot_widget.addItem(self.navigation_plot, row=3, col=0)
 
     def create_bottom_widget(self):
-        def create_button_and_label(button_text, tooltip, callback, label="", col=0):
-            button = QPushButton(button_text)
-            button.setToolTip(tooltip)
-            button.clicked.connect(callback)
-            label = QLabel("", alignment=Qt.AlignmentFlag.AlignCenter)
-            return {"button": button, "label": label, "col": col}
-
         self.curate_buttons = {
-            "first": create_button_and_label(
+            "first": _create_button_and_label(
                 "First", "Go to the first label", self.go_to_first_label, "", 0
             ),
-            "previous": create_button_and_label(
+            "previous": _create_button_and_label(
                 "Previous",
                 "Go to the previous label",
                 self.go_to_previous_label,
                 "",
                 1,
             ),
-            "check": create_button_and_label(
+            "check": _create_button_and_label(
                 "✅", "Mark as correct.", self.mark_as_correct, "", 2
             ),
-            "wrong": create_button_and_label(
+            "wrong": _create_button_and_label(
                 "❌", "Mark as incorrect.", self.mark_as_incorrect, "", 3
             ),
-            "next": create_button_and_label(
+            "next": _create_button_and_label(
                 "Next", "Go to the next label", self.go_to_next_label, "", 4
             ),
-            "last": create_button_and_label(
+            "last": _create_button_and_label(
                 "Last", "Go to the last label", self.go_to_last_label, "", 5
             ),
         }
@@ -415,17 +419,59 @@ class MainWindow(QMainWindow):
         if file_dialog.exec():
             selected_files = file_dialog.selectedFiles()
             if selected_files:
-                self.open_action.setEnabled(False)
-                self.file_path = Path(selected_files[0])
-                worker = AudioFileLoader(
-                    file_path=self.file_path,
-                    model=self.model,
-                    orcai_parameter=self.orcai_parameter,
-                    shape=self.shape,
-                )
-                worker.signals.result.connect(self.audio_file_loaded)
-                worker.signals.progress.connect(self.update_progress)
-                self.threadpool.start(worker)
+                self.open_file(Path(selected_files[0]))
+
+    def open_file(self, file_path: Path):
+        self.open_action.setEnabled(False)
+        self.recent_files_menu.setEnabled(False)
+        audioFileLoader = AudioFileLoader(
+            file_path=file_path,
+            model=self.model,
+            orcai_parameter=self.orcai_parameter,
+            shape=self.shape,
+        )
+        audioFileLoader.signals.result.connect(self.audio_file_loaded)
+        audioFileLoader.signals.progress.connect(self.update_progress)
+        self.threadpool.start(audioFileLoader)
+
+    def update_open_recent_menu(self):
+        """Update the recent files menu."""
+
+        self.recent_files_menu.clear()
+        settings = QSettings()
+        recent_files = settings.value("recentFiles", [], type=list)
+        for file_path in recent_files:
+            action = QAction(Path(file_path).name, self)
+            action.triggered.connect(lambda: self.open_file(file_path=Path(file_path)))
+            self.recent_files_menu.addAction(action)
+
+        self.recent_files_menu.addSeparator()
+        action_clear_recents = QAction("Clear Menu", self)
+        self.recent_files_menu.addAction(action_clear_recents)
+        action_clear_recents.triggered.connect(
+            lambda: self.update_recent_files(clear=True)
+        )
+        action_clear_recents.setEnabled(
+            len(recent_files) > 0,
+        )
+
+    def update_recent_files(self, file_path: Path = None, clear: bool = False):
+        """update recent files"""
+        settings = QSettings()
+        if clear:
+            settings.setValue("recentFiles", [])
+            self.update_open_recent_menu()
+            return
+        recent_files = settings.value("recentFiles", [], type=list)
+        if file_path is not None:
+            file_path = str(file_path)
+            if file_path in recent_files:
+                recent_files.remove(file_path)
+            recent_files.insert(0, file_path)
+        recent_files = recent_files[:N_RECENT_FILES]
+
+        settings.setValue("recentFiles", recent_files)
+        self.update_open_recent_menu()
 
     def update_progress(self, message):
         """Update the status bar with progress messages"""
@@ -443,11 +489,14 @@ class MainWindow(QMainWindow):
         self.predicted_labels = results["predicted_labels"]
 
         if self.spectrogram is not None:
+            self.file_path = results["file_path"]
             self.setWindowTitle(f"orcAI - {self.file_path.name}")
-            self.open_action.setEnabled(True)
             self.update_plots()
             self.update_buttons()
             self.update_label_texts()
+            self.open_action.setEnabled(True)
+            self.recent_files_menu.setEnabled(True)
+            self.update_recent_files(self.file_path)
 
     def update_plots(self):
         """Update the spectrogram plot with current data"""
@@ -487,8 +536,8 @@ class MainWindow(QMainWindow):
         self.navigation_plot.addItem(
             self.navigation_region,
         )
-        self.legend.clear()
 
+        self.legend.clear()
         for i, call in enumerate(self.orcai_parameter["calls"]):
             self.prediction_plot.plot(
                 x=self.prediction_times,
@@ -549,7 +598,6 @@ class MainWindow(QMainWindow):
         self.prediction_plot.setRange(xRange=region, disableAutoRange=True)
 
     def get_call_color(self, call, alpha=255):
-        """Get a color for the legend item"""
         call = call.replace("*", "")
         i = self.orcai_parameter["calls"].index(call)
         if i < 0:
