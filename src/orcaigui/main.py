@@ -25,8 +25,8 @@ from PyQt6.QtWidgets import (
 )
 
 from orcaigui.about import AboutWindow
-from orcaigui.io import AudioFileLoader
-from orcaigui.pgaxis import hhmmssAxisItem
+from orcaigui.extensions import SaveLabelsDialog, hhmmssAxisItem
+from orcaigui.workers import AudioFileLoader
 
 COLORMAPS = ["inferno", "viridis", "plasma", "magma", "cividis", "Greys"]
 N_RECENT_FILES = 5
@@ -108,6 +108,11 @@ class MainWindow(QMainWindow):
         self.window_close_action.setShortcut(QKeySequence.StandardKey.Close)
         self.window_close_action.triggered.connect(self.close)
         self.file_menu.addAction(self.window_close_action)
+
+        self.save_action = QAction("Save Labels", self)
+        self.save_action.setShortcut(QKeySequence.StandardKey.Save)
+        self.save_action.triggered.connect(self.save_labels_dialog)
+        self.file_menu.addAction(self.save_action)
 
         self.exit_action = QAction("Exit", self)
         self.exit_action.setShortcut(QKeySequence.StandardKey.Quit)
@@ -472,6 +477,22 @@ class MainWindow(QMainWindow):
 
         settings.setValue("recentFiles", recent_files)
         self.update_open_recent_menu()
+
+    def save_labels_dialog(self):
+        """Save the current labels to a Folder."""
+        if self.predicted_labels is None or self.predicted_labels.empty:
+            self.status.showMessage("No labels to save")
+            return
+
+        save_dialog = SaveLabelsDialog(self)
+
+        if save_dialog.exec():
+            selected_files = save_dialog.selectedFiles()
+            print(selected_files)
+            # if selected_files:
+            #     save_path = Path(selected_files[0])
+            #     self.predicted_labels.to_csv(save_path, index=False)
+            #     self.status.showMessage(f"Labels saved to {save_path.name}")
 
     def update_progress(self, message):
         """Update the status bar with progress messages"""

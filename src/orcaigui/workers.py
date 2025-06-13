@@ -12,24 +12,7 @@ from PyQt6.QtCore import QObject, QRunnable, pyqtSignal, pyqtSlot
 
 
 class AudioFileLoaderSignals(QObject):
-    """
-    Defines the signals available from a running worker thread.
-
-    Supported signals are:
-
-    finished
-        No data
-
-    error
-        tuple (exctype, value, traceback.format_exc() )
-
-    result
-        object data returned from processing, anything
-
-    progress
-        int indicating % progress
-
-    """
+    """Signals for the AudioFileLoader class."""
 
     finished = pyqtSignal()
     error = pyqtSignal(tuple)
@@ -100,7 +83,6 @@ class AudioFileLoader(QRunnable):
                 label_names,
                 time_steps_per_output_step=2
                 ** len(self.orcai_parameter["model"]["filters"]),
-                delta_t=1,
                 label_suffix="*",
             )
         except Exception as e:
