@@ -1,5 +1,7 @@
 from orcAI.auxiliary import seconds_to_hms
-from PyQt6.QtWidgets import QCheckBox, QFileDialog, QVBoxLayout
+from PyQt6.QtWidgets import (
+    QFileDialog,
+)
 from pyqtgraph import AxisItem
 
 
@@ -9,19 +11,18 @@ class hhmmssAxisItem(AxisItem):
         return [seconds_to_hms(v * scale) for v in values]
 
 
-class SaveLabelsDialog(QFileDialog):
-    """A dialog for saving labels to a file."""
-
+class SaveLabelsAsDialog(QFileDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Save Labels to Folder")
+        self.setWindowTitle("Save Labels As")
+        self.setFileMode(QFileDialog.FileMode.AnyFile)
         self.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
-        self.setFileMode(QFileDialog.FileMode.Directory)
-
-        extraOptions = QVBoxLayout()
-        checkbox_save_probabilities = QCheckBox("Save probabilities", self)
-        checkbox_save_probabilities.setToolTip(
-            "If checked, the probabilities will be saved to a seperate file."
+        self.setNameFilter("txt files (*.txt)")
+        self.setDefaultSuffix("txt")
+        self.selectFile(
+            str(
+                parent.recording_path.with_name(
+                    f"{parent.recording_path.stem}_c{parent.channel}_calls.txt"
+                )
+            )
         )
-        extraOptions.addWidget(checkbox_save_probabilities)
-        self.setLayout(extraOptions)

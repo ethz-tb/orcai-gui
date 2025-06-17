@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 from orcAI.predict import (
     compute_aggregated_predictions,
@@ -21,12 +23,18 @@ class AudioFileLoaderSignals(QObject):
 
 
 class AudioFileLoader(QRunnable):
-    def __init__(self, file_path, orcai_parameter, model, shape):
+    def __init__(
+        self,
+        recording_path: Path,
+        orcai_parameter: dict,
+        model,
+        shape: dict,
+    ):
         super().__init__()
         self.signals = AudioFileLoaderSignals()
         self.orcai_parameter = orcai_parameter
         self.shape = shape
-        self.file_path = file_path
+        self.recording_path = recording_path
         self.model = model
 
     @pyqtSlot()
@@ -34,7 +42,7 @@ class AudioFileLoader(QRunnable):
         self.signals.progress.emit("(1/4) Calculating spectrogram...")
         try:
             spectrogram, frequencies, times = calculate_spectrogram(
-                self.file_path,
+                self.recording_path,
                 channel=1,
                 spectrogram_parameter=self.orcai_parameter["spectrogram"],
             )
@@ -55,7 +63,7 @@ class AudioFileLoader(QRunnable):
         self.signals.progress.emit("(3/4) Computing predictions...")
         try:
             aggregated_predictions, overlap_count = compute_aggregated_predictions(
-                recording_path=self.file_path,
+                recording_path=self.recording_path,
                 spectrogram=pp_spectrogram,
                 model=self.model,
                 orcai_parameter=self.orcai_parameter,
@@ -89,10 +97,10 @@ class AudioFileLoader(QRunnable):
             print(e)
             self.signals.error.emit((type(e), e, e.__traceback__))
 
-        self.signals.progress.emit(f"Loaded file {self.file_path.name}")
+        self.signals.progress.emit(f"Loaded file {self.recording_path.name}")
         self.signals.result.emit(
             {
-                "file_path": self.file_path,
+                "file_path": self.recording_path,
                 "spectrogram": spectrogram,
                 "frequencies": frequencies,
                 "times": times,

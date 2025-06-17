@@ -40,7 +40,7 @@ orcui = "orcaigui.cli:cli"
 
 [tool.uv.sources]
 pyqtgraph = { git = "https://github.com/pyqtgraph/pyqtgraph" }
-orcai = { git = "https://github.com/ethz-tb/orcAI" }
+orcai = { git = "https://github.com/ethz-tb/orcAI", rev = "dev" }
 
 [dependency-groups]
 dev = [

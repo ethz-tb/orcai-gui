@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pyqtgraph as pg
 from orcAI.io import load_orcai_model
+from orcAI.predict import save_predictions
 from PyQt6.QtCore import (
     QSettings,
     Qt,
@@ -25,7 +26,7 @@ from PyQt6.QtWidgets import (
 )
 
 from orcaigui.about import AboutWindow
-from orcaigui.extensions import SaveLabelsDialog, hhmmssAxisItem
+from orcaigui.extensions import SaveLabelsAsDialog, hhmmssAxisItem
 from orcaigui.workers import AudioFileLoader
 
 COLORMAPS = ["inferno", "viridis", "plasma", "magma", "cividis", "Greys"]
@@ -51,12 +52,17 @@ class MainWindow(QMainWindow):
 
         self.model_dir = files("orcAI.models").joinpath("orcai-v1")
         self.model, self.orcai_parameter, self.shape = load_orcai_model(self.model_dir)
+        self.model_name = self.orcai_parameter["name"]
 
         self.spectrogram_parameter = self.orcai_parameter["spectrogram"]
         self.spectrogram = None
-        self.file_path = None
+        self.recording_path = None
+
+        self.channel = 1
         self.current_label = -1
         self.predicted_labels = None
+        self.labels = None
+        self.labels_path = None
 
         # Menu
         self.create_menus()
@@ -77,7 +83,6 @@ class MainWindow(QMainWindow):
         # Create top widget for spectrogram plot
 
         self.initilize_plots()
-
         self.update_plots()
 
         splitter.addWidget(self.plot_widget)
@@ -111,8 +116,13 @@ class MainWindow(QMainWindow):
 
         self.save_action = QAction("Save Labels", self)
         self.save_action.setShortcut(QKeySequence.StandardKey.Save)
-        self.save_action.triggered.connect(self.save_labels_dialog)
+        self.save_action.triggered.connect(self.save_labels)
         self.file_menu.addAction(self.save_action)
+
+        self.save_as_action = QAction("Save Labels as..", self)
+        self.save_as_action.setShortcut(QKeySequence.StandardKey.SaveAs)
+        self.save_as_action.triggered.connect(self.save_labels_as)
+        self.file_menu.addAction(self.save_as_action)
 
         self.exit_action = QAction("Exit", self)
         self.exit_action.setShortcut(QKeySequence.StandardKey.Quit)
@@ -426,11 +436,11 @@ class MainWindow(QMainWindow):
             if selected_files:
                 self.open_file(Path(selected_files[0]))
 
-    def open_file(self, file_path: Path):
+    def open_file(self, recording_path: Path):
         self.open_action.setEnabled(False)
         self.recent_files_menu.setEnabled(False)
         audioFileLoader = AudioFileLoader(
-            file_path=file_path,
+            recording_path=recording_path,
             model=self.model,
             orcai_parameter=self.orcai_parameter,
             shape=self.shape,
@@ -447,7 +457,9 @@ class MainWindow(QMainWindow):
         recent_files = settings.value("recentFiles", [], type=list)
         for file_path in recent_files:
             action = QAction(Path(file_path).name, self)
-            action.triggered.connect(lambda: self.open_file(file_path=Path(file_path)))
+            action.triggered.connect(
+                lambda: self.open_file(recording_path=Path(file_path))
+            )
             self.recent_files_menu.addAction(action)
 
         self.recent_files_menu.addSeparator()
@@ -478,22 +490,6 @@ class MainWindow(QMainWindow):
         settings.setValue("recentFiles", recent_files)
         self.update_open_recent_menu()
 
-    def save_labels_dialog(self):
-        """Save the current labels to a Folder."""
-        if self.predicted_labels is None or self.predicted_labels.empty:
-            self.status.showMessage("No labels to save")
-            return
-
-        save_dialog = SaveLabelsDialog(self)
-
-        if save_dialog.exec():
-            selected_files = save_dialog.selectedFiles()
-            print(selected_files)
-            # if selected_files:
-            #     save_path = Path(selected_files[0])
-            #     self.predicted_labels.to_csv(save_path, index=False)
-            #     self.status.showMessage(f"Labels saved to {save_path.name}")
-
     def update_progress(self, message):
         """Update the status bar with progress messages"""
         self.status.showMessage(message)
@@ -510,14 +506,14 @@ class MainWindow(QMainWindow):
         self.predicted_labels = results["predicted_labels"]
 
         if self.spectrogram is not None:
-            self.file_path = results["file_path"]
-            self.setWindowTitle(f"orcAI - {self.file_path.name}")
+            self.recording_path = results["file_path"]
+            self.setWindowTitle(f"orcAI - {self.recording_path.name}")
             self.update_plots()
             self.update_buttons()
             self.update_label_texts()
             self.open_action.setEnabled(True)
             self.recent_files_menu.setEnabled(True)
-            self.update_recent_files(self.file_path)
+            self.update_recent_files(self.recording_path)
 
     def update_plots(self):
         """Update the spectrogram plot with current data"""
@@ -612,7 +608,7 @@ class MainWindow(QMainWindow):
         self.update_label_texts()
 
     def update_plot_region(self):
-        """Update the spectrogram and prediction plots based on the selected region"""
+        """Update the spectrogram and prediction plot region based on the selected region"""
         region = self.navigation_region.getRegion()
 
         self.spectrogram_plot.setRange(xRange=region, disableAutoRange=True)
@@ -625,6 +621,35 @@ class MainWindow(QMainWindow):
             raise ValueError(f"Call '{call}' not found in orcAI parameters.")
 
         return pg.intColor(i, alpha=alpha, hues=len(self.orcai_parameter["calls"]))
+
+    def save_labels(self):
+        """Save the current labels to a Folder."""
+        if self.predicted_labels is None or self.predicted_labels.empty:
+            self.status.showMessage("No labels to save")
+            return
+        if self.labels_path is None:
+            self.save_labels_as()
+            return
+
+        save_predictions(
+            predicted_labels=self.predicted_labels,
+            output_path=self.labels_path,
+            delta_t=self.times[1] - self.times[0],
+        )
+
+    def save_labels_as(self):
+        """Save the current labels to a new file."""
+        if self.predicted_labels is None or self.predicted_labels.empty:
+            self.status.showMessage("No labels to save")
+            return
+
+        save_as_dialog = SaveLabelsAsDialog(self)
+
+        if save_as_dialog.exec():
+            selected_files = save_as_dialog.selectedFiles()
+            if selected_files:
+                self.labels_path = Path(selected_files[0])
+                self.save_labels()
 
 
 def predict_gui():

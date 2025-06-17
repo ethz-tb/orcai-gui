@@ -2,6 +2,10 @@ ruffle:
     ruff check --select I --fix
     ruff format
 
+upgrade:
+    uv lock --upgrade
+    uv sync
+
 build:
     uv sync
     uv build
