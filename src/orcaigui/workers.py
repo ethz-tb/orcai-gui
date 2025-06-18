@@ -37,7 +37,6 @@ class AudioFileLoader(QRunnable):
         self.recording_path = recording_path
         self.model = model
 
-    @pyqtSlot()
     def run(self):
         self.signals.progress.emit("(1/4) Calculating spectrogram...")
         try:

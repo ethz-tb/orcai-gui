@@ -5,40 +5,24 @@ from pathlib import Path
 import pyqtgraph as pg
 from orcAI.io import load_orcai_model
 from orcAI.predict import save_predictions
-from PyQt6.QtCore import (
-    QSettings,
-    Qt,
-    QThreadPool,
-)
+from PyQt6.QtCore import QSettings, Qt, QThreadPool, pyqtSlot
 from PyQt6.QtGui import QAction, QActionGroup, QIcon, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
-    QFrame,
-    QGridLayout,
-    QLabel,
     QMainWindow,
-    QPushButton,
-    QSizePolicy,
     QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
 from orcaigui.about import AboutWindow
+from orcaigui.curate_widget import CurateWidget
 from orcaigui.extensions import SaveLabelsAsDialog, hhmmssAxisItem
 from orcaigui.workers import AudioFileLoader
 
 COLORMAPS = ["inferno", "viridis", "plasma", "magma", "cividis", "Greys"]
 N_RECENT_FILES = 5
-
-
-def _create_button_and_label(button_text, tooltip, callback, label="", col=0):
-    button = QPushButton(button_text)
-    button.setToolTip(tooltip)
-    button.clicked.connect(callback)
-    label = QLabel("", alignment=Qt.AlignmentFlag.AlignCenter)
-    return {"button": button, "label": label, "col": col}
 
 
 class MainWindow(QMainWindow):
@@ -59,10 +43,6 @@ class MainWindow(QMainWindow):
         self.recording_path = None
 
         self.channel = 1
-        self.current_label = -1
-        self.predicted_labels = None
-        self.labels = None
-        self.labels_path = None
 
         # Menu
         self.create_menus()
@@ -88,8 +68,11 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.plot_widget)
 
         # Create bottom control widget
-        bottom_widget = self.create_bottom_widget()
-        splitter.addWidget(bottom_widget)
+        self.curate_widget = CurateWidget(self)
+        self.curate_widget.status.connect(self.status.showMessage)
+        self.curate_widget.label.connect(self.focus_on_label)
+
+        splitter.addWidget(self.curate_widget)
 
         # Set initial splitter sizes (70% for plot, 30% for bottom)
         splitter.setSizes([750, 250])
@@ -177,6 +160,7 @@ class MainWindow(QMainWindow):
             self.spectrogram_parameter["n_overlap"]
             / self.spectrogram_parameter["sampling_rate"]
         )
+
         navigation_y_axis = pg.AxisItem(orientation="left")
         navigation_y_axis.setLabel("Frequency", units="Hz")
         navigation_y_axis.setRange(0, 1.0)
@@ -184,7 +168,6 @@ class MainWindow(QMainWindow):
         self.navigation_plot = pg.PlotItem(
             axisItems={
                 "bottom": navigation_x_axis,
-                "left": navigation_y_axis,
             },
             enableMenu=False,
         )
@@ -273,157 +256,6 @@ class MainWindow(QMainWindow):
         self.legend_box.setMaximumHeight(10)
         self.plot_widget.addItem(self.navigation_plot, row=3, col=0)
 
-    def create_bottom_widget(self):
-        self.curate_buttons = {
-            "first": _create_button_and_label(
-                "First", "Go to the first label", self.go_to_first_label, "", 0
-            ),
-            "previous": _create_button_and_label(
-                "Previous",
-                "Go to the previous label",
-                self.go_to_previous_label,
-                "",
-                1,
-            ),
-            "check": _create_button_and_label(
-                "✅", "Mark as correct.", self.mark_as_correct, "", 2
-            ),
-            "wrong": _create_button_and_label(
-                "❌", "Mark as incorrect.", self.mark_as_incorrect, "", 3
-            ),
-            "next": _create_button_and_label(
-                "Next", "Go to the next label", self.go_to_next_label, "", 4
-            ),
-            "last": _create_button_and_label(
-                "Last", "Go to the last label", self.go_to_last_label, "", 5
-            ),
-        }
-        bottom_layout = QGridLayout()
-        for value in self.curate_buttons.values():
-            bottom_layout.addWidget(value["button"], 0, value["col"])
-            bottom_layout.addWidget(value["label"], 1, value["col"])
-
-        bottom_widget = QFrame()
-        bottom_widget.setLayout(bottom_layout)
-        bottom_widget.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
-        bottom_widget.setMinimumHeight(50)
-        self.update_buttons()
-
-        return bottom_widget
-
-    def mark_as_correct(self):
-        """Mark the current label as correct."""
-        # TODO: Implement logic to mark the current label as correct
-        self.status.showMessage("Not implemented yet")
-        self.go_to_next_label()
-
-    def mark_as_incorrect(self):
-        """Mark the current label as incorrect."""
-        # TODO: Implement logic to mark the current label as incorrect
-        self.status.showMessage("Not implemented yet")
-        self.go_to_next_label()
-
-    def go_to_first_label(self):
-        """Go to the first label in the spectrogram."""
-        if self.predicted_labels is None or self.predicted_labels.empty:
-            self.status.showMessage("No labels available")
-            return
-        self.current_label = 0
-        self.focus_on_label(self.current_label)
-
-    def go_to_previous_label(self):
-        """Go to the previous label in the spectrogram."""
-        if self.predicted_labels is None or self.predicted_labels.empty:
-            self.status.showMessage("No labels available")
-            return
-        if self.current_label < 1:
-            self.status.showMessage("Already at the first label")
-            return
-        self.current_label -= 1
-        self.focus_on_label(self.current_label)
-
-    def go_to_next_label(self):
-        """Go to the next label in the spectrogram."""
-        if self.predicted_labels is None or self.predicted_labels.empty:
-            self.status.showMessage("No labels available")
-            return
-        if self.current_label >= len(self.predicted_labels) - 1:
-            self.status.showMessage("Already at the last label")
-            return
-        self.current_label += 1
-        self.focus_on_label(self.current_label)
-        pass
-
-    def go_to_last_label(self):
-        """Go to the last label in the spectrogram."""
-        if self.predicted_labels is None or self.predicted_labels.empty:
-            self.status.showMessage("No labels available")
-            return
-        self.current_label = len(self.predicted_labels) - 1
-        self.focus_on_label(self.current_label)
-
-    def focus_on_label(self, label_index):
-        """Focus on a specific label in the spectrogram."""
-        if self.predicted_labels is None or self.predicted_labels.empty:
-            self.status.showMessage("No labels available")
-            return
-        if label_index < 0 or label_index >= len(self.predicted_labels):
-            self.status.showMessage("Invalid label index")
-            return
-
-        label = self.predicted_labels.iloc[label_index]
-        start, stop = label.start, label.stop
-        self.navigation_region.setRegion([start * 0.95, stop * 1.05])
-        self.update_buttons()
-        self.update_label_texts()
-
-    def update_buttons(self):
-        """Update the state of the navigation buttons based on the current label."""
-
-        if self.predicted_labels is None:
-            for value in self.curate_buttons.values():
-                value["button"].setEnabled(False)
-                value["label"].setText("")
-        else:
-            self.curate_buttons["first"]["button"].setEnabled(
-                self.current_label > 0 or self.current_label == -1
-            )
-            self.curate_buttons["previous"]["button"].setEnabled(self.current_label > 0)
-            self.curate_buttons["next"]["button"].setEnabled(
-                self.current_label < len(self.predicted_labels) - 1
-            )
-            self.curate_buttons["last"]["button"].setEnabled(
-                self.current_label < len(self.predicted_labels) - 1
-            )
-            self.curate_buttons["check"]["button"].setEnabled(
-                not self.current_label < 0
-            )
-            self.curate_buttons["wrong"]["button"].setEnabled(
-                not self.current_label < 0
-            )
-
-    def update_label_texts(self):
-        """Update the label texts in the bottom control widget."""
-        if self.predicted_labels is None or self.predicted_labels.empty:
-            return
-
-        label = self.predicted_labels.iloc[self.current_label]
-
-        label_texts = {
-            "first": f"{self.predicted_labels.index[0] + 1}: {self.predicted_labels.iloc[0].label}",
-            "previous": f"{self.predicted_labels.index[max(0, self.current_label - 1)] + 1}: {self.predicted_labels.iloc[max(0, self.current_label - 1)].label}",
-            "check": f"{self.predicted_labels.index[self.current_label] + 1}: {label.label}",
-            "wrong": f"{self.predicted_labels.index[self.current_label] + 1}: {label.label}",
-            "next": f"{self.predicted_labels.index[min(len(self.predicted_labels) - 1, self.current_label + 1)] + 1}: {self.predicted_labels.iloc[min(len(self.predicted_labels) - 1, self.current_label + 1)].label}",
-            "last": f"{self.predicted_labels.index[-1] + 1}: {self.predicted_labels.iloc[-1].label}",
-        }
-
-        for key, value in label_texts.items():
-            if key in self.curate_buttons:
-                self.curate_buttons[key]["label"].setText(value)
-
     def open_file_dialog(self):
         """Open file dialog to select an audio recording"""
         file_dialog = QFileDialog(self)
@@ -448,6 +280,32 @@ class MainWindow(QMainWindow):
         audioFileLoader.signals.result.connect(self.audio_file_loaded)
         audioFileLoader.signals.progress.connect(self.update_progress)
         self.threadpool.start(audioFileLoader)
+
+    @pyqtSlot(str)
+    def update_progress(self, message):
+        """Update the status bar with progress messages"""
+        self.status.showMessage(message)
+
+    @pyqtSlot(dict)
+    def audio_file_loaded(self, results):
+        self.spectrogram, self.frequencies, self.times = (
+            results["spectrogram"],
+            results["frequencies"],
+            results["times"],
+        )
+        self.pp_spectrogram = results["pp_spectrogram"]
+        self.aggregated_predictions = results["aggregated_predictions"]
+        self.prediction_times = results["prediction_times"]
+        self.predicted_labels = results["predicted_labels"]
+        self.curate_widget.update_predicted_labels(self.predicted_labels)
+
+        if self.spectrogram is not None:
+            self.recording_path = results["file_path"]
+            self.setWindowTitle(f"orcAI - {self.recording_path.name}")
+            self.update_plots()
+            self.open_action.setEnabled(True)
+            self.recent_files_menu.setEnabled(True)
+            self.update_recent_files(self.recording_path)
 
     def update_open_recent_menu(self):
         """Update the recent files menu."""
@@ -489,31 +347,6 @@ class MainWindow(QMainWindow):
 
         settings.setValue("recentFiles", recent_files)
         self.update_open_recent_menu()
-
-    def update_progress(self, message):
-        """Update the status bar with progress messages"""
-        self.status.showMessage(message)
-
-    def audio_file_loaded(self, results):
-        self.spectrogram, self.frequencies, self.times = (
-            results["spectrogram"],
-            results["frequencies"],
-            results["times"],
-        )
-        self.pp_spectrogram = results["pp_spectrogram"]
-        self.aggregated_predictions = results["aggregated_predictions"]
-        self.prediction_times = results["prediction_times"]
-        self.predicted_labels = results["predicted_labels"]
-
-        if self.spectrogram is not None:
-            self.recording_path = results["file_path"]
-            self.setWindowTitle(f"orcAI - {self.recording_path.name}")
-            self.update_plots()
-            self.update_buttons()
-            self.update_label_texts()
-            self.open_action.setEnabled(True)
-            self.recent_files_menu.setEnabled(True)
-            self.update_recent_files(self.recording_path)
 
     def update_plots(self):
         """Update the spectrogram plot with current data"""
@@ -566,7 +399,7 @@ class MainWindow(QMainWindow):
             )
             self.legend.addItem(self.prediction_plot.items[-1], call)
 
-        for label in self.predicted_labels.itertuples():
+        for label in self.curate_widget.predicted_labels.itertuples():
             self.prediction_plot.addItem(
                 pg.BarGraphItem(
                     x0=label.start,
@@ -605,7 +438,6 @@ class MainWindow(QMainWindow):
         self.prediction_plot.setLimits(xMin=0, xMax=plot_xMax)
         self.prediction_plot.setRange(xRange=plot_xRange, yRange=[-0.3, 1.0])
         self.prediction_plot.showGrid(x=True, y=True)
-        self.update_label_texts()
 
     def update_plot_region(self):
         """Update the spectrogram and prediction plot region based on the selected region"""
@@ -622,9 +454,19 @@ class MainWindow(QMainWindow):
 
         return pg.intColor(i, alpha=alpha, hues=len(self.orcai_parameter["calls"]))
 
+    def focus_on_label(self, label_index):
+        """Focus on a specific label in the spectrogram."""
+
+        label = self.curate_widget.predicted_labels.iloc[label_index]
+        start, stop = label.start, label.stop
+        self.navigation_region.setRegion([start * 0.95, stop * 1.05])
+
     def save_labels(self):
         """Save the current labels to a Folder."""
-        if self.predicted_labels is None or self.predicted_labels.empty:
+        if (
+            self.curate_widget.predicted_labels is None
+            or self.curate_widget.predicted_labels.empty
+        ):
             self.status.showMessage("No labels to save")
             return
         if self.labels_path is None:
@@ -632,14 +474,17 @@ class MainWindow(QMainWindow):
             return
 
         save_predictions(
-            predicted_labels=self.predicted_labels,
+            predicted_labels=self.curate_widget.predicted_labels,
             output_path=self.labels_path,
             delta_t=self.times[1] - self.times[0],
         )
 
     def save_labels_as(self):
         """Save the current labels to a new file."""
-        if self.predicted_labels is None or self.predicted_labels.empty:
+        if (
+            self.curate_widget.predicted_labels is None
+            or self.curate_widget.predicted_labels.empty
+        ):
             self.status.showMessage("No labels to save")
             return
 
@@ -648,7 +493,7 @@ class MainWindow(QMainWindow):
         if save_as_dialog.exec():
             selected_files = save_as_dialog.selectedFiles()
             if selected_files:
-                self.labels_path = Path(selected_files[0])
+                self.curate_widget.labels_path = Path(selected_files[0])
                 self.save_labels()
 
 
