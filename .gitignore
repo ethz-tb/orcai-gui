@@ -12,3 +12,5 @@ wheels/
 # dev
 /dev
 *.afdesign
+.code-workspace
+.vscode/
