@@ -2,7 +2,6 @@ import sys
 from importlib.resources import files
 from pathlib import Path
 
-import pyqtgraph as pg
 from orcAI.io import load_orcai_model
 from orcAI.predict import save_predictions
 from PyQt6.QtCore import QSettings, Qt, QThreadPool, pyqtSlot
@@ -18,7 +17,8 @@ from PyQt6.QtWidgets import (
 
 from orcaigui.about import AboutWindow
 from orcaigui.curate_widget import CurateWidget
-from orcaigui.extensions import SaveLabelsAsDialog, hhmmssAxisItem
+from orcaigui.dialogs import SaveLabelsAsDialog
+from orcaigui.spectrogram_widget import SpectrogramWidget
 from orcaigui.workers import AudioFileLoader
 
 COLORMAPS = ["inferno", "viridis", "plasma", "magma", "cividis", "Greys"]
@@ -31,9 +31,6 @@ class MainWindow(QMainWindow):
         self.threadpool = QThreadPool()
         self.setWindowTitle("orcAI")
 
-        settings = QSettings()
-        self.colormap = settings.value("colormap", defaultValue="Greys", type=str)
-
         self.model_dir = files("orcAI.models").joinpath("orcai-v1")
         self.model, self.orcai_parameter, self.shape = load_orcai_model(self.model_dir)
         self.model_name = self.orcai_parameter["name"]
@@ -44,6 +41,8 @@ class MainWindow(QMainWindow):
 
         self.channel = 1
 
+        settings = QSettings()
+        self.colormap_name = settings.value("colormap", defaultValue="Greys", type=str)
         # Menu
         self.create_menus()
 
@@ -61,16 +60,18 @@ class MainWindow(QMainWindow):
         layout.addWidget(splitter)
 
         # Create top widget for spectrogram plot
+        self.spectrogram_widget = SpectrogramWidget(
+            spectrogram_parameter=self.spectrogram_parameter,
+            calls=self.orcai_parameter["calls"],
+            colormap_name=self.colormap_name,
+        )
 
-        self.initilize_plots()
-        self.update_plots()
-
-        splitter.addWidget(self.plot_widget)
+        splitter.addWidget(self.spectrogram_widget)
 
         # Create bottom control widget
         self.curate_widget = CurateWidget(self)
         self.curate_widget.status.connect(self.status.showMessage)
-        self.curate_widget.label.connect(self.focus_on_label)
+        self.curate_widget.label.connect(self.spectrogram_widget.focus_on_label)
 
         splitter.addWidget(self.curate_widget)
 
@@ -122,9 +123,9 @@ class MainWindow(QMainWindow):
         for colormap in COLORMAPS:
             action = QAction(colormap, self.colormap_group, checkable=True)
             action.setData(colormap)
-            action.triggered.connect(lambda cmap=colormap: self.setColormap(cmap))
+            action.triggered.connect(lambda _, cmap=colormap: self.set_colormap(cmap))
             self.colormap_menu.addAction(action)
-            if colormap == self.colormap:
+            if colormap == self.colormap_name:
                 action.setChecked(True)
 
         # Help menu
@@ -133,12 +134,12 @@ class MainWindow(QMainWindow):
         self.about_action.triggered.connect(self.show_about_window)
         self.help_menu.addAction(self.about_action)
 
-    def setColormap(self, colormap):
+    def set_colormap(self, cmap):
         """Set the colormap for the spectrogram plot."""
-        self.colormap = colormap
+        self.colormap_name = cmap
         settings = QSettings()
-        settings.setValue("colormap", colormap)
-        self.update_plots()
+        settings.setValue("colormap", self.colormap_name)
+        self.spectrogram_widget.set_colormap(colormap_name=self.colormap_name)
 
     def show_about_window(self):
         """Show the about window."""
@@ -146,115 +147,6 @@ class MainWindow(QMainWindow):
         self.about_window.setWindowTitle("About orcAI")
         self.about_window.resize(300, 200)
         self.about_window.show()
-
-    def initilize_plots(self):
-        y_axis_style = {
-            "tickTextWidth": 15,
-            "autoExpandTextSpace": False,
-            "autoReduceTextSpace": False,
-        }
-        self.maxXRange = 1500
-
-        navigation_x_axis = hhmmssAxisItem(orientation="bottom")
-        navigation_x_axis.setScale(
-            self.spectrogram_parameter["n_overlap"]
-            / self.spectrogram_parameter["sampling_rate"]
-        )
-
-        navigation_y_axis = pg.AxisItem(orientation="left")
-        navigation_y_axis.setLabel("Frequency", units="Hz")
-        navigation_y_axis.setRange(0, 1.0)
-        navigation_y_axis.setStyle(**y_axis_style)
-        self.navigation_plot = pg.PlotItem(
-            axisItems={
-                "bottom": navigation_x_axis,
-            },
-            enableMenu=False,
-        )
-        self.navigation_plot.hideAxis("left")
-        self.navigation_plot.hideAxis("bottom")
-        self.navigation_plot.setMaximumHeight(25)
-        self.navigation_plot.setMouseEnabled(x=False, y=False)
-        vb = self.navigation_plot.getViewBox()
-        vb.setBackgroundColor((50, 50, 50))
-
-        self.navigation_plot.hideButtons()
-
-        spectrogram_y_axis = pg.AxisItem(orientation="left")
-        spectrogram_y_axis.setLabel("Frequency", units="Hz")
-        spectrogram_y_axis.setRange(0, self.spectrogram_parameter["n_overlap"] + 1)
-        spectrogram_y_axis.setScale(
-            (self.spectrogram_parameter["sampling_rate"] / 2)
-            / self.spectrogram_parameter["n_overlap"]
-        )
-        spectrogram_y_axis.setStyle(**y_axis_style)
-
-        spectrogram_x_axis = hhmmssAxisItem(orientation="bottom")
-        spectrogram_x_axis.setScale(
-            self.spectrogram_parameter["n_overlap"]
-            / self.spectrogram_parameter["sampling_rate"]
-        )
-
-        self.spectrogram_plot = pg.PlotItem(
-            axisItems={
-                "bottom": spectrogram_x_axis,
-                "left": spectrogram_y_axis,
-            }
-        )
-        self.spectrogram_plot.setMouseEnabled(x=False, y=False)
-        self.spectrogram_plot.setLimits(xMin=0)
-        self.spectrogram_plot.hideAxis("bottom")
-        self.spectrogram_plot.hideButtons()
-
-        prediction_x_axis = hhmmssAxisItem(orientation="bottom")
-        prediction_x_axis.setScale(
-            self.spectrogram_parameter["n_overlap"]
-            / self.spectrogram_parameter["sampling_rate"]
-        )
-
-        prediction_y_axis = pg.AxisItem(orientation="left")
-        prediction_y_axis.setLabel("Probability")
-        prediction_y_axis.setRange(-0.3, 1.0)
-        prediction_y_axis.setTicks(
-            [
-                [
-                    (0.0, "0"),
-                    (0.5, "0.5"),
-                    (1.0, "1"),
-                ],
-                [],
-            ]
-        )
-        prediction_y_axis.setStyle(**y_axis_style)
-
-        self.prediction_plot = pg.PlotItem(
-            axisItems={
-                "bottom": prediction_x_axis,
-                "left": prediction_y_axis,
-            }
-        )
-        self.prediction_plot.setMouseEnabled(x=False, y=False)
-        self.prediction_plot.setLabel("left", "Probability")
-        self.prediction_plot.setLimits(xMin=0)
-        self.prediction_plot.setXLink(self.spectrogram_plot)
-        self.prediction_plot.setMaximumHeight(100)
-        self.prediction_plot.hideButtons()
-
-        self.plot_widget = pg.GraphicsLayoutWidget()
-
-        self.plot_widget.addItem(self.spectrogram_plot, row=0, col=0)
-        self.plot_widget.addItem(self.prediction_plot, row=1, col=0)
-        self.legend_box = self.plot_widget.addViewBox(
-            row=2, col=0, enableMouse=False, lockAspect=False
-        )
-        self.legend = pg.LegendItem(colCount=self.shape["num_labels"])
-        self.legend.setParentItem(self.legend_box)
-        self.legend.anchor((0.5, 0.5), (0.5, 0.5))
-        self.legend.mouseDragEvent = lambda *args, **kwargs: None
-        self.legend.hoverEvent = lambda *args, **kwargs: None
-        # legend.sampleType.mouseClickEvent = lambda *args, **kwargs: None
-        self.legend_box.setMaximumHeight(10)
-        self.plot_widget.addItem(self.navigation_plot, row=3, col=0)
 
     def open_file_dialog(self):
         """Open file dialog to select an audio recording"""
@@ -288,6 +180,7 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(dict)
     def audio_file_loaded(self, results):
+        self.recording_path = results["file_path"]
         self.spectrogram, self.frequencies, self.times = (
             results["spectrogram"],
             results["frequencies"],
@@ -299,13 +192,21 @@ class MainWindow(QMainWindow):
         self.predicted_labels = results["predicted_labels"]
         self.curate_widget.update_predicted_labels(self.predicted_labels)
 
-        if self.spectrogram is not None:
-            self.recording_path = results["file_path"]
-            self.setWindowTitle(f"orcAI - {self.recording_path.name}")
-            self.update_plots()
-            self.open_action.setEnabled(True)
-            self.recent_files_menu.setEnabled(True)
-            self.update_recent_files(self.recording_path)
+        self.spectrogram_widget.update_plot_data(
+            spectrogram=self.spectrogram,
+            frequencies=self.frequencies,
+            times=self.times,
+            pp_spectrogram=self.pp_spectrogram,
+            aggregated_predictions=self.aggregated_predictions,
+            prediction_times=self.prediction_times,
+            predicted_labels=self.predicted_labels,
+            colormap_name=self.colormap_name,
+        )
+
+        self.setWindowTitle(f"orcAI - {self.recording_path.name}")
+        self.open_action.setEnabled(True)
+        self.recent_files_menu.setEnabled(True)
+        self.update_recent_files(self.recording_path)
 
     def update_open_recent_menu(self):
         """Update the recent files menu."""
@@ -347,119 +248,6 @@ class MainWindow(QMainWindow):
 
         settings.setValue("recentFiles", recent_files)
         self.update_open_recent_menu()
-
-    def update_plots(self):
-        """Update the spectrogram plot with current data"""
-
-        if self.spectrogram is None:
-            self.status.showMessage("No spectrogram data available")
-            return
-
-        plot_xMax = len(self.times) * 1.05
-        plot_xRange = [
-            0,
-            plot_xMax if len(self.times) <= self.maxXRange else self.maxXRange,
-        ]
-
-        img = pg.ImageItem()
-        img.setImage(self.spectrogram.T)
-
-        lut = pg.colormap.get(self.colormap, source="matplotlib").getLookupTable()
-        img.setLookupTable(lut)
-
-        self.spectrogram_plot.clear()
-        self.spectrogram_plot.addItem(img)
-        self.spectrogram_plot.setLimits(xMin=0, xMax=plot_xMax)
-        self.spectrogram_plot.setRange(xRange=plot_xRange)
-
-        self.prediction_plot.clear()
-        self.navigation_plot.clear()
-        self.navigation_plot.setLimits(xMin=0, xMax=plot_xMax)
-        self.navigation_plot.setRange(xRange=[0, plot_xMax])
-        self.navigation_region = pg.LinearRegionItem(
-            values=plot_xRange,
-            bounds=[0, plot_xMax],
-            brush=pg.mkBrush(255, 255, 255, 50),
-            movable=True,
-        )
-        self.navigation_region.sigRegionChangeFinished.connect(self.update_plot_region)
-        self.navigation_plot.addItem(
-            self.navigation_region,
-        )
-
-        self.legend.clear()
-        for i, call in enumerate(self.orcai_parameter["calls"]):
-            self.prediction_plot.plot(
-                x=self.prediction_times,
-                y=self.aggregated_predictions[:, i],
-                pen=pg.mkPen(
-                    self.get_call_color(call),
-                ),
-                name=self.orcai_parameter["calls"][i],
-            )
-            self.legend.addItem(self.prediction_plot.items[-1], call)
-
-        for label in self.curate_widget.predicted_labels.itertuples():
-            self.prediction_plot.addItem(
-                pg.BarGraphItem(
-                    x0=label.start,
-                    x1=label.stop,
-                    y0=0.25,
-                    y1=0.75,
-                    brush=pg.mkBrush(
-                        self.get_call_color(label.label, alpha=100),
-                    ),
-                    pen=pg.mkPen(self.get_call_color(label.label, alpha=200)),
-                )
-            )
-            self.navigation_plot.addItem(
-                pg.BarGraphItem(
-                    x0=label.start,
-                    x1=label.stop,
-                    y0=0.25,
-                    y1=0.75,
-                    brush=pg.mkBrush(
-                        self.get_call_color(label.label, alpha=100),
-                    ),
-                    pen=pg.mkPen(self.get_call_color(label.label, alpha=200)),
-                )
-            )
-            call_label = pg.TextItem(
-                text=label.label,
-                color=self.get_call_color(label.label, alpha=200),
-                anchor=(0.5, 0.5),
-            )
-            self.prediction_plot.addItem(call_label)
-            call_label.setPos(
-                (label.start + label.stop) / 2,
-                0.5,
-            )
-
-        self.prediction_plot.setLimits(xMin=0, xMax=plot_xMax)
-        self.prediction_plot.setRange(xRange=plot_xRange, yRange=[-0.3, 1.0])
-        self.prediction_plot.showGrid(x=True, y=True)
-
-    def update_plot_region(self):
-        """Update the spectrogram and prediction plot region based on the selected region"""
-        region = self.navigation_region.getRegion()
-
-        self.spectrogram_plot.setRange(xRange=region, disableAutoRange=True)
-        self.prediction_plot.setRange(xRange=region, disableAutoRange=True)
-
-    def get_call_color(self, call, alpha=255):
-        call = call.replace("*", "")
-        i = self.orcai_parameter["calls"].index(call)
-        if i < 0:
-            raise ValueError(f"Call '{call}' not found in orcAI parameters.")
-
-        return pg.intColor(i, alpha=alpha, hues=len(self.orcai_parameter["calls"]))
-
-    def focus_on_label(self, label_index):
-        """Focus on a specific label in the spectrogram."""
-
-        label = self.curate_widget.predicted_labels.iloc[label_index]
-        start, stop = label.start, label.stop
-        self.navigation_region.setRegion([start * 0.95, stop * 1.05])
 
     def save_labels(self):
         """Save the current labels to a Folder."""

@@ -10,7 +10,7 @@ from orcAI.spectrogram import (
     calculate_spectrogram,
     preprocess_spectrogram,
 )
-from PyQt6.QtCore import QObject, QRunnable, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import QObject, QRunnable, pyqtSignal
 
 
 class AudioFileLoaderSignals(QObject):

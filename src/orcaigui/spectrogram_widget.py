@@ -1,0 +1,337 @@
+from pyqtgraph import (
+    AxisItem,
+    GraphicsLayoutWidget,
+    ImageItem,
+    LegendItem,
+    PlotItem,
+    colormap,
+    mkPen,
+    mkBrush,
+    TextItem,
+    BarGraphItem,
+    intColor,
+    LinearRegionItem,
+)
+
+
+from orcaigui.extensions import timedelta
+
+
+class DurationAxisItem(AxisItem):
+    def __init__(self, scale: float):
+        super().__init__(orientation="bottom")
+        self.setScale(scale)
+
+    def tickStrings(self, values, scale, spacing):
+        """Format tick labels as HH:MM:SS or HH:MM:SS.sss."""
+
+        low_range = spacing * scale < 1
+        return [
+            timedelta(seconds=v * scale).to_string(ms_f="03.0f" if low_range else None)
+            for v in values
+        ]
+
+
+class YAxisItem(AxisItem):
+    def __init__(
+        self,
+        label: str,
+        units: str | None,
+        range: tuple,
+        scale: float = 1.0,
+        ticks: list = None,
+    ):
+        super().__init__(orientation="left")
+        self.setStyle(
+            tickTextWidth=15,
+            autoExpandTextSpace=False,
+            autoReduceTextSpace=False,
+        )
+        self.setLabel(label, units=units)
+        self.setRange(*range)
+        self.setScale(scale)
+        if ticks is not None:
+            self.setTicks(ticks)
+
+
+class TimePlot(PlotItem):
+    def __init__(
+        self,
+        x_scale: float,
+        y_label: str,
+        y_units: str,
+        y_range: list,
+        y_scale: float = 1.0,
+        y_ticks: list | None = None,
+        hide_y_axis: bool = False,
+        max_height: int | None = None,
+    ):
+        axisItems = {
+            "bottom": DurationAxisItem(scale=x_scale),
+            "left": YAxisItem(
+                label=y_label,
+                units=y_units,
+                range=y_range,
+                scale=y_scale,
+                ticks=y_ticks,
+            ),
+        }
+        super().__init__(axisItems=axisItems)
+        self.setMouseEnabled(x=False, y=False)
+        self.setLimits(xMin=0)
+        self.hideButtons()
+        if hide_y_axis:
+            self.hideAxis("bottom")
+        if max_height is not None:
+            self.setMaximumHeight(max_height)
+
+
+class NavigationPlot(PlotItem):
+    def __init__(
+        self,
+        x_scale: float,
+        max_height: int = 25,
+        background_color=(50, 50, 50),
+        enableMenu=False,
+    ):
+        axisItems = {"bottom": DurationAxisItem(scale=x_scale)}
+        super().__init__(axisItems=axisItems, enableMenu=enableMenu)
+        self.hideAxis("left")
+        self.hideAxis("bottom")
+        self.setMaximumHeight(max_height)
+        self.setMouseEnabled(x=False, y=False)
+        self.getViewBox().setBackgroundColor(background_color)
+        self.hideButtons()
+
+
+class SpectrogramWidget(GraphicsLayoutWidget):
+    """A custom plot widget showing the spectrogram and predictions."""
+
+    def __init__(
+        self,
+        spectrogram_parameter: dict,
+        calls: list[str],
+        max_x_range=1500,
+        colormap_name="Greys",
+        expand_focus_region=0.1,  # expand the focus region by 10% -> length(longest label) * (1 + expand_focus_region)
+        parent=None,
+    ):
+        super().__init__(parent)
+
+        self.spectrogram = None
+        self.frequencies = None
+        self.times = None
+        self.pp_spectrogram = None
+        self.aggregated_predictions = None
+        self.prediction_times = None
+        self.calls = calls
+        self.max_x_range = max_x_range
+        self.colormap_name = colormap_name
+        self.expand_focus_region = expand_focus_region
+
+        x_scale = (
+            spectrogram_parameter["n_overlap"] / spectrogram_parameter["sampling_rate"]
+        )
+
+        self.spectrogram_plot = TimePlot(
+            x_scale=x_scale,
+            y_label="Frequency",
+            y_units="Hz",
+            y_range=(0, spectrogram_parameter["n_overlap"] + 1),
+            y_scale=(spectrogram_parameter["sampling_rate"] / 2)
+            / spectrogram_parameter["n_overlap"],
+            hide_y_axis=True,
+        )
+
+        self.prediction_plot = TimePlot(
+            x_scale=x_scale,
+            y_label="Probability",
+            y_units=None,
+            y_range=[-0.3, 1.0],
+            y_ticks=[
+                [
+                    (0.0, "0"),
+                    (0.5, "0.5"),
+                    (1.0, "1"),
+                ],
+                [],
+            ],
+            max_height=100,
+        )
+        self.prediction_plot.setXLink(self.spectrogram_plot)
+
+        self.navigation_plot = NavigationPlot(
+            x_scale=x_scale,
+            max_height=25,
+            background_color=(50, 50, 50),
+        )
+
+        self.addItem(self.spectrogram_plot, row=0, col=0)
+
+        self.addItem(self.prediction_plot, row=1, col=0)
+        self.prediction_legend_box = self.addViewBox(
+            row=2, col=0, enableMouse=False, lockAspect=False
+        )
+        self.prediction_legend = LegendItem(colCount=len(self.calls))
+        self.prediction_legend.setParentItem(self.prediction_legend_box)
+        self.prediction_legend.anchor((0.5, 0.5), (0.5, 0.5))
+        self.prediction_legend.mouseDragEvent = lambda *args, **kwargs: None
+        self.prediction_legend.hoverEvent = lambda *args, **kwargs: None
+        self.prediction_legend_box.setMaximumHeight(10)
+
+        self.addItem(self.navigation_plot, row=3, col=0)
+
+    def update_plot_data(
+        self,
+        spectrogram,
+        frequencies,
+        times,
+        pp_spectrogram,
+        aggregated_predictions,
+        prediction_times,
+        predicted_labels,
+        colormap_name="Greys",
+    ):
+        """Update the plot data with new spectrogram and predictions."""
+        self.spectrogram = spectrogram
+        self.frequencies = frequencies
+        self.times = times
+        self.pp_spectrogram = pp_spectrogram
+        self.aggregated_predictions = aggregated_predictions
+        self.prediction_times = prediction_times
+        self.predicted_labels = predicted_labels
+        self.max_label_duration = (
+            max(predicted_labels["stop"] - predicted_labels["start"])
+            if not predicted_labels.empty
+            else 0
+        )
+        self.plot_x_max = len(self.times) * 1.05
+        self.plot_x_range = [
+            0,
+            self.plot_x_max
+            if len(self.times) <= self.max_x_range
+            else self.max_x_range,
+        ]
+        self.colormap_name = colormap_name
+        self.updatePlots()
+
+    def updatePlots(self):
+        """Update the spectrogram plot"""
+        if self.spectrogram is None:
+            self.status.showMessage("No spectrogram data available")
+            return
+
+        self.spectrogram_image = ImageItem()
+        self.spectrogram_image.setImage(self.spectrogram.T)
+        lut = colormap.get(self.colormap_name, source="matplotlib").getLookupTable()
+        self.spectrogram_image.setLookupTable(lut)
+
+        self.spectrogram_plot.clear()
+        self.spectrogram_plot.addItem(self.spectrogram_image)
+
+        self.spectrogram_plot.setLimits(xMin=0, xMax=self.plot_x_max)
+        self.spectrogram_plot.setRange(xRange=self.plot_x_range)
+
+        self.prediction_legend.clear()
+        self.navigation_plot.clear()
+        self.prediction_legend.clear()
+
+        self.navigation_plot.setLimits(xMin=0, xMax=self.plot_x_max)
+        self.navigation_plot.setRange(xRange=[0, self.plot_x_max])
+        self.navigation_region = LinearRegionItem(
+            values=self.plot_x_range,
+            bounds=[0, self.plot_x_max],
+            brush=mkBrush(255, 255, 255, 50),
+            movable=True,
+        )
+        self.navigation_region.sigRegionChangeFinished.connect(self.update_plot_region)
+        self.navigation_plot.addItem(
+            self.navigation_region,
+        )
+
+        for i, call in enumerate(self.calls):
+            self.prediction_plot.plot(
+                x=self.prediction_times,
+                y=self.aggregated_predictions[:, i],
+                pen=mkPen(
+                    self._get_call_color(call),
+                ),
+                name=self.calls[i],
+            )
+            self.prediction_legend.addItem(self.prediction_plot.items[-1], call)
+
+        for label in self.predicted_labels.itertuples():
+            self.prediction_plot.addItem(
+                BarGraphItem(
+                    x0=label.start,
+                    x1=label.stop,
+                    y0=0.25,
+                    y1=0.75,
+                    brush=mkBrush(
+                        self._get_call_color(label.label, alpha=100),
+                    ),
+                    pen=mkPen(self._get_call_color(label.label, alpha=200)),
+                )
+            )
+            self.navigation_plot.addItem(
+                BarGraphItem(
+                    x0=label.start,
+                    x1=label.stop,
+                    y0=0.25,
+                    y1=0.75,
+                    brush=mkBrush(
+                        self._get_call_color(label.label, alpha=100),
+                    ),
+                    pen=mkPen(self._get_call_color(label.label, alpha=200)),
+                )
+            )
+            call_label = TextItem(
+                text=label.label,
+                color=self._get_call_color(label.label, alpha=200),
+                anchor=(0.5, 0.5),
+            )
+            self.prediction_plot.addItem(call_label)
+            call_label.setPos(
+                (label.start + label.stop) / 2,
+                0.5,
+            )
+
+        self.prediction_plot.setLimits(xMin=0, xMax=self.plot_x_max)
+        self.prediction_plot.setRange(xRange=self.plot_x_range)
+        self.prediction_plot.showGrid(x=True, y=True)
+
+    def update_plot_region(self, region):
+        region = self.navigation_region.getRegion()
+        self.spectrogram_plot.setRange(xRange=region, disableAutoRange=True)
+        self.prediction_plot.setRange(xRange=region, disableAutoRange=True)
+
+    def set_colormap(self, colormap_name):
+        """Set the colormap for the spectrogram."""
+        if colormap_name == self.colormap_name:
+            return
+        if self.spectrogram is None:
+            return
+        self.colormap_name = colormap_name
+        lut = colormap.get(self.colormap_name, source="matplotlib").getLookupTable()
+
+        self.spectrogram_image.setLookupTable(lut)
+
+    def focus_on_label(self, label_index):
+        """Focus on a specific label in the spectrogram."""
+
+        label = self.predicted_labels.iloc[label_index]
+        start, stop = label.start, label.stop
+        duration = stop - start
+        extra = (
+            (self.max_label_duration * (1 + self.expand_focus_region)) - duration
+        ) / 2
+
+        self.navigation_region.setRegion([start - extra, stop + extra])
+
+    def _get_call_color(self, call, alpha=255):
+        call = call.replace("*", "")
+        i = self.calls.index(call)
+        if i < 0:
+            raise ValueError(f"Call '{call}' not in predicted calls.")
+
+        return intColor(i, alpha=alpha, hues=len(self.calls))

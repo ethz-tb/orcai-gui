@@ -1,28 +1,19 @@
-from orcAI.auxiliary import seconds_to_hms
-from PyQt6.QtWidgets import (
-    QFileDialog,
-)
-from pyqtgraph import AxisItem
+from datetime import timedelta
 
 
-class hhmmssAxisItem(AxisItem):
-    def tickStrings(self, values, scale, spacing):
-        """Format tick labels as HH:MM:SS"""
-        return [seconds_to_hms(v * scale) for v in values]
-
-
-class SaveLabelsAsDialog(QFileDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Save Labels As")
-        self.setFileMode(QFileDialog.FileMode.AnyFile)
-        self.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
-        self.setNameFilter("txt files (*.txt)")
-        self.setDefaultSuffix("txt")
-        self.selectFile(
-            str(
-                parent.recording_path.with_name(
-                    f"{parent.recording_path.stem}_c{parent.channel}_calls.txt"
-                )
-            )
-        )
+class timedelta(timedelta):
+    def to_string(
+        self,
+        hh_f: str = "02.0f",
+        mm_f: str = "02.0f",
+        ss_f: str = "02.0f",
+        ms_f: str | None = "03.0f",
+    ):
+        """Convert timedelta to a string in HH:MM:SS(.sss) format."""
+        mm, ss = divmod(self.total_seconds(), 60)
+        hh, mm = divmod(mm, 60)
+        s = f"{hh:{hh_f}}:{mm:{mm_f}}:{ss:{ss_f}}"
+        if ms_f is not None:
+            ms = self.microseconds / 1000 if self.microseconds else 0
+            s = s + f".{ms:{ms_f}}"
+        return s

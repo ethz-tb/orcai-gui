@@ -54,17 +54,13 @@ class CurateWidget(QFrame):
             curate_button_layout.addWidget(value["label"], 1, value["col"])
 
         curate_layout.addLayout(curate_button_layout)
+
         self.current_label_label = QLabel(
-            f"Current label: {self.current_label}",
-            alignment=Qt.AlignmentFlag.AlignLeft,
-        )
-        self.n_labels_label = QLabel(
-            f"# Labels: {self.n_labels}",
+            f"Current label: {self.current_label} / {self.n_labels}",
             alignment=Qt.AlignmentFlag.AlignLeft,
         )
 
         curate_layout.addWidget(self.current_label_label)
-        curate_layout.addWidget(self.n_labels_label)
 
         self.setLayout(curate_layout)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -94,7 +90,7 @@ class CurateWidget(QFrame):
                 value["button"].setEnabled(False)
                 value["label"].setText("")
         else:
-            self.curate_buttons["first"]["button"].setEnabled(self.current_label > 0)
+            self.curate_buttons["first"]["button"].setEnabled(self.current_label >= 0)
             self.curate_buttons["previous"]["button"].setEnabled(self.current_label > 0)
             self.curate_buttons["next"]["button"].setEnabled(
                 self.current_label < self.n_labels - 1
@@ -130,9 +126,8 @@ class CurateWidget(QFrame):
                 self.curate_buttons[key]["label"].setText(value)
 
         self.current_label_label.setText(
-            f"Current label: {self.predicted_labels.index[self.current_label] + 1} - {label.label}"
+            f"Current label: {self.current_label + 1} / {self.n_labels} - {label.label}"
         )
-        self.n_labels_label.setText(f"# Labels: {self.n_labels}")
 
     def mark_as_correct(self):
         """Mark the current label as correct."""
