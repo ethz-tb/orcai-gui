@@ -17,6 +17,15 @@ from pyqtgraph import (
 from orcaigui.extensions import timedelta
 
 
+class TextItem(TextItem):
+    """Extend TextItem with setOpts function to unify interface with BarGraphItem."""
+
+    def setOpts(self, **opts):
+        """Set options for the TextItem."""
+        if "text_color" in opts:
+            self.setColor(opts["text_color"])
+
+
 class DurationAxisItem(AxisItem):
     def __init__(self, scale: float):
         super().__init__(orientation="bottom")
@@ -213,9 +222,9 @@ class SpectrogramWidget(GraphicsLayoutWidget):
             else self.max_x_range,
         ]
         self.colormap_name = colormap_name
-        self.updatePlots()
+        self.update_plots()
 
-    def updatePlots(self):
+    def update_plots(self):
         """Update the spectrogram plot"""
         if self.spectrogram is None:
             self.status.showMessage("No spectrogram data available")
@@ -232,7 +241,7 @@ class SpectrogramWidget(GraphicsLayoutWidget):
         self.spectrogram_plot.setLimits(xMin=0, xMax=self.plot_x_max)
         self.spectrogram_plot.setRange(xRange=self.plot_x_range)
 
-        self.prediction_legend.clear()
+        self.prediction_plot.clear()
         self.navigation_plot.clear()
         self.prediction_legend.clear()
 
@@ -259,46 +268,82 @@ class SpectrogramWidget(GraphicsLayoutWidget):
                 name=self.calls[i],
             )
             self.prediction_legend.addItem(self.prediction_plot.items[-1], call)
-
         for label in self.predicted_labels.itertuples():
-            self.prediction_plot.addItem(
-                BarGraphItem(
-                    x0=label.start,
-                    x1=label.stop,
-                    y0=0.25,
-                    y1=0.75,
-                    brush=mkBrush(
-                        self._get_call_color(label.label, alpha=100),
-                    ),
-                    pen=mkPen(self._get_call_color(label.label, alpha=200)),
-                )
+            prediction_bgitem = BarGraphItem(
+                x0=label.start,
+                x1=label.stop,
+                y0=0.25,
+                y1=0.75,
+                brush=mkBrush(
+                    self._get_call_color(label.label, alpha=0.3),
+                ),
+                pen=mkPen(self._get_call_color(label.label, alpha=0.7)),
             )
-            self.navigation_plot.addItem(
-                BarGraphItem(
-                    x0=label.start,
-                    x1=label.stop,
-                    y0=0.25,
-                    y1=0.75,
-                    brush=mkBrush(
-                        self._get_call_color(label.label, alpha=100),
-                    ),
-                    pen=mkPen(self._get_call_color(label.label, alpha=200)),
-                )
+            prediction_bgitem.setObjectName(str(label.Index))
+            # Can't use same item (and .copy() doesn't work)
+            navigation_bgitem = BarGraphItem(
+                x0=label.start,
+                x1=label.stop,
+                y0=0.25,
+                y1=0.75,
+                brush=mkBrush(
+                    self._get_call_color(label.label, alpha=0.3),
+                ),
+                pen=mkPen(self._get_call_color(label.label, alpha=0.7)),
             )
+            navigation_bgitem.setObjectName(str(label.Index))
+
             call_label = TextItem(
                 text=label.label,
-                color=self._get_call_color(label.label, alpha=200),
+                color=self._get_call_color(label.label, alpha=0.7),
                 anchor=(0.5, 0.5),
             )
+            call_label.setObjectName(str(label.Index))
+            self.prediction_plot.addItem(prediction_bgitem)
+            self.navigation_plot.addItem(navigation_bgitem)
             self.prediction_plot.addItem(call_label)
             call_label.setPos(
                 (label.start + label.stop) / 2,
                 0.5,
             )
-
         self.prediction_plot.setLimits(xMin=0, xMax=self.plot_x_max)
         self.prediction_plot.setRange(xRange=self.plot_x_range)
         self.prediction_plot.showGrid(x=True, y=True)
+
+    def update_prediction_label(self, label_ok: bool, label_index: int):
+        label = self.predicted_labels.iloc[label_index]
+        prediction_plot_items = [
+            x for x in self.prediction_plot.items if x.objectName() == str(label_index)
+        ]
+        navigation_plot_items = [
+            x for x in self.navigation_plot.items if x.objectName() == str(label_index)
+        ]
+        if label_ok:
+            prediction_plot_brush = mkBrush(
+                self._get_call_color(label.label, alpha=0.3)
+            )
+            prediction_plot_pen = mkPen((0, 255, 0, 200), width=2)
+            prediction_plot_text_color = self._get_call_color(label.label, alpha=0.7)
+            navigation_plot_brush = prediction_plot_brush
+            navigation_plot_pen = mkPen(self._get_call_color(label.label, alpha=0.7))
+        else:
+            prediction_plot_brush = (100, 100, 100, int(0.5 * 255))
+            prediction_plot_pen = (200, 200, 200, int(0.5 * 255))
+            prediction_plot_text_color = prediction_plot_pen
+            navigation_plot_brush = prediction_plot_brush
+            navigation_plot_pen = prediction_plot_pen
+
+        for item in prediction_plot_items:
+            item.setOpts(
+                brush=prediction_plot_brush,
+                pen=prediction_plot_pen,
+                text_color=prediction_plot_text_color,
+            )
+        for item in navigation_plot_items:
+            item.setOpts(
+                brush=navigation_plot_brush,
+                pen=navigation_plot_pen,
+            )
 
     def update_plot_region(self, region):
         region = self.navigation_region.getRegion()
@@ -328,10 +373,14 @@ class SpectrogramWidget(GraphicsLayoutWidget):
 
         self.navigation_region.setRegion([start - extra, stop + extra])
 
-    def _get_call_color(self, call, alpha=255):
+    def _get_call_color(self, call: str, alpha: float = 1):
         call = call.replace("*", "")
         i = self.calls.index(call)
-        if i < 0:
-            raise ValueError(f"Call '{call}' not in predicted calls.")
+        if alpha < 0:
+            alpha = 0
+        if alpha > 1:
+            alpha = 255
+        else:
+            alpha = 255 * alpha
 
-        return intColor(i, alpha=alpha, hues=len(self.calls))
+        return intColor(i, alpha=int(alpha), hues=len(self.calls))

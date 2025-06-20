@@ -1,4 +1,5 @@
 import sys
+from getpass import getuser
 from importlib.resources import files
 from pathlib import Path
 
@@ -16,10 +17,10 @@ from PyQt6.QtWidgets import (
 )
 
 from orcaigui.about import AboutWindow
+from orcaigui.audio_file_loader import AudioFileLoader, SpectrogramProcessor
 from orcaigui.curate_widget import CurateWidget
-from orcaigui.dialogs import SaveLabelsAsDialog
+from orcaigui.dialogs import SaveLabelsAsDialog, ChannelSelectDialog
 from orcaigui.spectrogram_widget import SpectrogramWidget
-from orcaigui.workers import AudioFileLoader
 
 COLORMAPS = ["inferno", "viridis", "plasma", "magma", "cividis", "Greys"]
 N_RECENT_FILES = 5
@@ -38,11 +39,14 @@ class MainWindow(QMainWindow):
         self.spectrogram_parameter = self.orcai_parameter["spectrogram"]
         self.spectrogram = None
         self.recording_path = None
+        self.labels_path = None
 
         self.channel = 1
 
         settings = QSettings()
         self.colormap_name = settings.value("colormap", defaultValue="Greys", type=str)
+        self.username = settings.value("username", defaultValue=getuser(), type=str)
+
         # Menu
         self.create_menus()
 
@@ -72,6 +76,9 @@ class MainWindow(QMainWindow):
         self.curate_widget = CurateWidget(self)
         self.curate_widget.status.connect(self.status.showMessage)
         self.curate_widget.label.connect(self.spectrogram_widget.focus_on_label)
+        self.curate_widget.labels_updated.connect(
+            self.spectrogram_widget.update_prediction_label
+        )
 
         splitter.addWidget(self.curate_widget)
 
@@ -165,9 +172,7 @@ class MainWindow(QMainWindow):
         self.recent_files_menu.setEnabled(False)
         audioFileLoader = AudioFileLoader(
             recording_path=recording_path,
-            model=self.model,
-            orcai_parameter=self.orcai_parameter,
-            shape=self.shape,
+            sampling_rate=self.spectrogram_parameter["sampling_rate"],
         )
         audioFileLoader.signals.result.connect(self.audio_file_loaded)
         audioFileLoader.signals.progress.connect(self.update_progress)
@@ -180,7 +185,46 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(dict)
     def audio_file_loaded(self, results):
-        self.recording_path = results["file_path"]
+        if "error" in results:
+            error_type, error_value, error_traceback = results["error"]
+            print(error_type, error_value, error_traceback)
+            self.status.showMessage(f"Error loading audio file: {error_value}")
+            return
+
+        wav_file = results["wav_file"]
+        n_channels = results["n_channels"]
+        self.recording_path = results["recording_path"]
+
+        if n_channels > 1:
+            channel_select_dialog = ChannelSelectDialog(n_channels)
+            if channel_select_dialog.exec():
+                self.channel = (
+                    channel_select_dialog.channel_select_box.currentIndex() + 1
+                )
+            else:
+                self.status.showMessage("No channel selected. Operation cancelled.")
+                return
+        else:
+            self.channel = 1
+        spectrogram_processor = SpectrogramProcessor(
+            wav_file=wav_file,
+            recording_path=self.recording_path,
+            orcai_parameter=self.orcai_parameter,
+            model=self.model,
+            shape=self.shape,
+        )
+        spectrogram_processor.signals.result.connect(self.spectrogram_processed)
+        spectrogram_processor.signals.progress.connect(self.update_progress)
+        self.threadpool.start(spectrogram_processor)
+
+    @pyqtSlot(dict)
+    def spectrogram_processed(self, results):
+        if "error" in results:
+            error_type, error_value, error_traceback = results["error"]
+            print(error_type, error_value, error_traceback)
+            self.status.showMessage(f"Error processing spectrogram: {error_value}")
+            return
+
         self.spectrogram, self.frequencies, self.times = (
             results["spectrogram"],
             results["frequencies"],
@@ -203,7 +247,7 @@ class MainWindow(QMainWindow):
             colormap_name=self.colormap_name,
         )
 
-        self.setWindowTitle(f"orcAI - {self.recording_path.name}")
+        self.setWindowTitle(f"orcAI - {self.recording_path.name} c{self.channel}")
         self.open_action.setEnabled(True)
         self.recent_files_menu.setEnabled(True)
         self.update_recent_files(self.recording_path)
@@ -217,7 +261,7 @@ class MainWindow(QMainWindow):
         for file_path in recent_files:
             action = QAction(Path(file_path).name, self)
             action.triggered.connect(
-                lambda: self.open_file(recording_path=Path(file_path))
+                lambda _, path=Path(file_path): self.open_file(recording_path=path)
             )
             self.recent_files_menu.addAction(action)
 
@@ -262,9 +306,19 @@ class MainWindow(QMainWindow):
             return
 
         save_predictions(
-            predicted_labels=self.curate_widget.predicted_labels,
+            predicted_labels=self.curate_widget.predicted_labels[
+                self.curate_widget.predicted_labels["label_ok"] == True  # noqa: E712
+            ],
             output_path=self.labels_path,
             delta_t=self.times[1] - self.times[0],
+            columns=[
+                "start",
+                "stop",
+                "label",
+                "label_checked",
+                "label_ok",
+                "label_source",
+            ],
         )
 
     def save_labels_as(self):
@@ -281,7 +335,7 @@ class MainWindow(QMainWindow):
         if save_as_dialog.exec():
             selected_files = save_as_dialog.selectedFiles()
             if selected_files:
-                self.curate_widget.labels_path = Path(selected_files[0])
+                self.labels_path = Path(selected_files[0])
                 self.save_labels()
 
 

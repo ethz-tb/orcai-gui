@@ -14,12 +14,13 @@ class CurateWidget(QFrame):
 
     status = pyqtSignal(str)
     label = pyqtSignal(int)
+    labels_updated = pyqtSignal(bool, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
         self.predicted_labels = None
-
+        self.username = parent.username
         self.current_label = 0
         self.n_labels = 0
 
@@ -131,14 +132,29 @@ class CurateWidget(QFrame):
 
     def mark_as_correct(self):
         """Mark the current label as correct."""
-        # TODO: Implement logic to mark the current label as correct
-        self.status.emit("Not implemented yet")
+        self.predicted_labels.loc[self.current_label, "label_checked"] = True
+        self.predicted_labels.loc[self.current_label, "label_source"] = (
+            f"manual:{self.username}"
+        )
+        self.predicted_labels.loc[self.current_label, "label_ok"] = True
+        self.predicted_labels.loc[self.current_label, "label"] = (
+            self.predicted_labels.loc[self.current_label, "label"].replace("*", "")
+        )
+
+        self.labels_updated.emit(True, self.current_label)
+        self.status.emit("Label marked as correct")
         self.go_to_next_label()
 
     def mark_as_incorrect(self):
         """Mark the current label as incorrect."""
-        # TODO: Implement logic to mark the current label as incorrect
-        self.status.emit("Not implemented yet")
+        self.predicted_labels.loc[self.current_label, "label_checked"] = True
+        self.predicted_labels.loc[self.current_label, "label_source"] = (
+            f"manual:{self.username}"
+        )
+        self.predicted_labels.loc[self.current_label, "label_ok"] = False
+        self.predicted_labels.loc[self.current_label, "label_ok"] = False
+        self.labels_updated.emit(False, self.current_label)
+        self.status.emit("Label marked as incorrect")
         self.go_to_next_label()
 
     def go_to_first_label(self):
