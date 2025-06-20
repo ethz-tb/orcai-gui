@@ -186,14 +186,17 @@ class MainWindow(QMainWindow):
     @pyqtSlot(dict)
     def audio_file_loaded(self, results):
         if "error" in results:
-            error_type, error_value, error_traceback = results["error"]
-            print(error_type, error_value, error_traceback)
+            (error_type, error_value) = results["error"]
+            print(error_type, error_value)
             self.status.showMessage(f"Error loading audio file: {error_value}")
             return
 
         wav_file = results["wav_file"]
         n_channels = results["n_channels"]
         self.recording_path = results["recording_path"]
+        self.default_labels_path = self.recording_path.with_name(
+            f"{self.recording_path.stem}_c{self.channel}_calls.txt"
+        )
 
         if n_channels > 1:
             channel_select_dialog = ChannelSelectDialog(n_channels)
@@ -209,6 +212,7 @@ class MainWindow(QMainWindow):
         spectrogram_processor = SpectrogramProcessor(
             wav_file=wav_file,
             recording_path=self.recording_path,
+            labels_path=self.default_labels_path,
             orcai_parameter=self.orcai_parameter,
             model=self.model,
             shape=self.shape,
@@ -220,8 +224,8 @@ class MainWindow(QMainWindow):
     @pyqtSlot(dict)
     def spectrogram_processed(self, results):
         if "error" in results:
-            error_type, error_value, error_traceback = results["error"]
-            print(error_type, error_value, error_traceback)
+            error_type, error_value = results["error"]
+            print(error_type, error_value)
             self.status.showMessage(f"Error processing spectrogram: {error_value}")
             return
 
@@ -330,7 +334,9 @@ class MainWindow(QMainWindow):
             self.status.showMessage("No labels to save")
             return
 
-        save_as_dialog = SaveLabelsAsDialog(self)
+        save_as_dialog = SaveLabelsAsDialog(
+            default_labels_path=self.default_labels_path, parent=self
+        )
 
         if save_as_dialog.exec():
             selected_files = save_as_dialog.selectedFiles()
