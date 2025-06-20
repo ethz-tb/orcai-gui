@@ -14,6 +14,7 @@ from pyqtgraph import (
 )
 
 from orcaigui.extensions import timedelta
+from orcaigui.orcaidata import OrcaiData
 
 
 class TextItem(TextItem):
@@ -126,12 +127,7 @@ class SpectrogramWidget(GraphicsLayoutWidget):
     ):
         super().__init__(parent)
 
-        self.spectrogram = None
-        self.frequencies = None
-        self.times = None
-        self.pp_spectrogram = None
-        self.aggregated_predictions = None
-        self.prediction_times = None
+        self.data = None
         self.calls = calls
         self.max_x_range = max_x_range
         self.colormap_name = colormap_name
@@ -189,35 +185,25 @@ class SpectrogramWidget(GraphicsLayoutWidget):
 
         self.addItem(self.navigation_plot, row=3, col=0)
 
-    def update_plot_data(
+    def update_data(
         self,
-        spectrogram,
-        frequencies,
-        times,
-        pp_spectrogram,
-        aggregated_predictions,
-        prediction_times,
-        predicted_labels,
-        colormap_name="Greys",
+        data: OrcaiData,
+        colormap_name: str = "Greys",
     ):
         """Update the plot data with new spectrogram and predictions."""
-        self.spectrogram = spectrogram
-        self.frequencies = frequencies
-        self.times = times
-        self.pp_spectrogram = pp_spectrogram
-        self.aggregated_predictions = aggregated_predictions
-        self.prediction_times = prediction_times
-        self.predicted_labels = predicted_labels
+        self.data = data
         self.max_label_duration = (
-            max(predicted_labels["stop"] - predicted_labels["start"])
-            if not predicted_labels.empty
+            max(
+                self.data.predicted_labels["stop"] - self.data.predicted_labels["start"]
+            )
+            if not self.data.predicted_labels.empty
             else 0
         )
-        self.plot_x_max = len(self.times) * 1.05
+        self.plot_x_max = len(self.data.times) * 1.05
         self.plot_x_range = [
             0,
             self.plot_x_max
-            if len(self.times) <= self.max_x_range
+            if len(self.data.times) <= self.max_x_range
             else self.max_x_range,
         ]
         self.colormap_name = colormap_name
@@ -225,12 +211,12 @@ class SpectrogramWidget(GraphicsLayoutWidget):
 
     def update_plots(self):
         """Update the spectrogram plot"""
-        if self.spectrogram is None:
-            self.status.showMessage("No spectrogram data available")
+        if self.data is None:
+            self.status.showMessage("No data available")
             return
 
         self.spectrogram_image = ImageItem()
-        self.spectrogram_image.setImage(self.spectrogram.T)
+        self.spectrogram_image.setImage(self.data.spectrogram.T)
         lut = colormap.get(self.colormap_name, source="matplotlib").getLookupTable()
         self.spectrogram_image.setLookupTable(lut)
 
@@ -259,15 +245,16 @@ class SpectrogramWidget(GraphicsLayoutWidget):
 
         for i, call in enumerate(self.calls):
             self.prediction_plot.plot(
-                x=self.prediction_times,
-                y=self.aggregated_predictions[:, i],
+                x=self.data.prediction_times,
+                y=self.data.aggregated_predictions[:, i],
                 pen=mkPen(
                     self._get_call_color(call),
                 ),
                 name=self.calls[i],
             )
             self.prediction_legend.addItem(self.prediction_plot.items[-1], call)
-        for label in self.predicted_labels.itertuples():
+
+        for label in self.data.predicted_labels.itertuples():
             prediction_bgitem = BarGraphItem(
                 x0=label.start,
                 x1=label.stop,
@@ -310,7 +297,8 @@ class SpectrogramWidget(GraphicsLayoutWidget):
         self.prediction_plot.showGrid(x=True, y=True)
 
     def update_prediction_label(self, label_ok: bool, label_index: int):
-        label = self.predicted_labels.iloc[label_index]
+        print(self.data.predicted_labels.to_numpy())
+        label = self.data.predicted_labels.iloc[label_index]
         prediction_plot_items = [
             x for x in self.prediction_plot.items if x.objectName() == str(label_index)
         ]
@@ -363,7 +351,7 @@ class SpectrogramWidget(GraphicsLayoutWidget):
     def focus_on_label(self, label_index):
         """Focus on a specific label in the spectrogram."""
 
-        label = self.predicted_labels.iloc[label_index]
+        label = self.data.predicted_labels.iloc[label_index]
         start, stop = label.start, label.stop
         duration = stop - start
         extra = (

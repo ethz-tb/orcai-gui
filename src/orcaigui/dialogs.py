@@ -1,10 +1,12 @@
+from pathlib import Path
+
 from PyQt6.QtWidgets import (
-    QFileDialog,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
-    QVBoxLayout,
+    QFileDialog,
     QLabel,
-    QComboBox,
+    QVBoxLayout,
 )
 
 
@@ -36,12 +38,22 @@ class ChannelSelectDialog(QDialog):
         self.setLayout(layout)
 
 
-class SaveLabelsAsDialog(QFileDialog):
-    def __init__(self, default_labels_path: str, parent=None):
+class ExportLabelsAsDialog(QFileDialog):
+    def __init__(self, default_labels_path: str | Path, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Save Labels As")
+        self.setWindowTitle("Export Labels")
         self.setFileMode(QFileDialog.FileMode.AnyFile)
         self.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
         self.setNameFilter("txt files (*.txt)")
         self.setDefaultSuffix("txt")
-        self.selectFile(default_labels_path)
+        self.selectFile(str(default_labels_path))
+
+
+class ExportProjectAsDialog(QFileDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Export Project as")
+        self.setFileMode(QFileDialog.FileMode.AnyFile)
+        self.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+        self.setNameFilter("orcai project files (*.orcai)")
+        self.setDefaultSuffix("orcai")

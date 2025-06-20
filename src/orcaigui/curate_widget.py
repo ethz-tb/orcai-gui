@@ -8,6 +8,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from orcaigui.orcaidata import OrcaiData
+
 
 class CurateWidget(QFrame):
     """Widget for curating labels in the spectrogram."""
@@ -19,7 +21,7 @@ class CurateWidget(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.predicted_labels = None
+        self.data = None
         self.username = parent.username
         self.current_label = 0
         self.n_labels = 0
@@ -66,7 +68,7 @@ class CurateWidget(QFrame):
         self.setLayout(curate_layout)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setMinimumHeight(50)
-        self.update_predicted_labels(self.predicted_labels)
+        self.update_data(self.data)
 
     def _create_button_and_label(self, button_text, tooltip, callback, label="", col=0):
         button = QPushButton(button_text)
@@ -75,18 +77,18 @@ class CurateWidget(QFrame):
         label = QLabel("", alignment=Qt.AlignmentFlag.AlignCenter)
         return {"button": button, "label": label, "col": col}
 
-    def update_predicted_labels(self, predicted_labels):
+    def update_data(self, data: OrcaiData):
         """Update the widget with the current label and predicted labels."""
-        self.predicted_labels = predicted_labels
+        self.data = data
         self.current_label = 0
-        self.n_labels = len(predicted_labels) if predicted_labels is not None else 0
+        self.n_labels = len(self.data.predicted_labels) if self.data is not None else 0
         self.update_buttons()
         self.update_label_texts()
 
     def update_buttons(self):
         """Update the state of the navigation buttons based on the current label."""
 
-        if self.predicted_labels is None or self.n_labels == 0:
+        if self.data is None or self.n_labels == 0:
             for value in self.curate_buttons.values():
                 value["button"].setEnabled(False)
                 value["label"].setText("")
@@ -108,18 +110,18 @@ class CurateWidget(QFrame):
 
     def update_label_texts(self):
         """Update the label texts in the bottom control widget."""
-        if self.predicted_labels is None or self.predicted_labels.empty:
+        if self.data is None or self.data.predicted_labels.empty:
             return
 
-        label = self.predicted_labels.iloc[self.current_label]
+        label = self.data.predicted_labels.iloc[self.current_label]
 
         label_texts = {
-            "first": f"{self.predicted_labels.index[0] + 1}: {self.predicted_labels.iloc[0].label}",
-            "previous": f"{self.predicted_labels.index[max(0, self.current_label - 1)] + 1}: {self.predicted_labels.iloc[max(0, self.current_label - 1)].label}",
-            "check": f"{self.predicted_labels.index[self.current_label] + 1}: {label.label}",
-            "wrong": f"{self.predicted_labels.index[self.current_label] + 1}: {label.label}",
-            "next": f"{self.predicted_labels.index[min(len(self.predicted_labels) - 1, self.current_label + 1)] + 1}: {self.predicted_labels.iloc[min(len(self.predicted_labels) - 1, self.current_label + 1)].label}",
-            "last": f"{self.predicted_labels.index[-1] + 1}: {self.predicted_labels.iloc[-1].label}",
+            "first": f"{self.data.predicted_labels.index[0] + 1}: {self.data.predicted_labels.iloc[0].label}",
+            "previous": f"{self.data.predicted_labels.index[max(0, self.current_label - 1)] + 1}: {self.data.predicted_labels.iloc[max(0, self.current_label - 1)].label}",
+            "check": f"{self.data.predicted_labels.index[self.current_label] + 1}: {label.label}",
+            "wrong": f"{self.data.predicted_labels.index[self.current_label] + 1}: {label.label}",
+            "next": f"{self.data.predicted_labels.index[min(len(self.data.predicted_labels) - 1, self.current_label + 1)] + 1}: {self.data.predicted_labels.iloc[min(len(self.data.predicted_labels) - 1, self.current_label + 1)].label}",
+            "last": f"{self.data.predicted_labels.index[-1] + 1}: {self.data.predicted_labels.iloc[-1].label}",
         }
 
         for key, value in label_texts.items():
@@ -132,13 +134,13 @@ class CurateWidget(QFrame):
 
     def mark_as_correct(self):
         """Mark the current label as correct."""
-        self.predicted_labels.loc[self.current_label, "label_checked"] = True
-        self.predicted_labels.loc[self.current_label, "label_source"] = (
+        self.data.predicted_labels.loc[self.current_label, "label_checked"] = True
+        self.data.predicted_labels.loc[self.current_label, "label_source"] = (
             f"manual:{self.username}"
         )
-        self.predicted_labels.loc[self.current_label, "label_ok"] = True
-        self.predicted_labels.loc[self.current_label, "label"] = (
-            self.predicted_labels.loc[self.current_label, "label"].replace("*", "")
+        self.data.predicted_labels.loc[self.current_label, "label_ok"] = True
+        self.data.predicted_labels.loc[self.current_label, "label"] = (
+            self.data.predicted_labels.loc[self.current_label, "label"].replace("*", "")
         )
 
         self.labels_updated.emit(True, self.current_label)
@@ -147,19 +149,19 @@ class CurateWidget(QFrame):
 
     def mark_as_incorrect(self):
         """Mark the current label as incorrect."""
-        self.predicted_labels.loc[self.current_label, "label_checked"] = True
-        self.predicted_labels.loc[self.current_label, "label_source"] = (
+        self.data.predicted_labels.loc[self.current_label, "label_checked"] = True
+        self.data.predicted_labels.loc[self.current_label, "label_source"] = (
             f"manual:{self.username}"
         )
-        self.predicted_labels.loc[self.current_label, "label_ok"] = False
-        self.predicted_labels.loc[self.current_label, "label_ok"] = False
+        self.data.predicted_labels.loc[self.current_label, "label_ok"] = False
+        self.data.predicted_labels.loc[self.current_label, "label_ok"] = False
         self.labels_updated.emit(False, self.current_label)
         self.status.emit("Label marked as incorrect")
         self.go_to_next_label()
 
     def go_to_first_label(self):
         """Go to the first label in the spectrogram."""
-        if self.predicted_labels is None or self.predicted_labels.empty:
+        if self.data.predicted_labels is None or self.data.predicted_labels.empty:
             self.status.emit("No labels available")
             return
         self.current_label = 0
@@ -167,7 +169,7 @@ class CurateWidget(QFrame):
 
     def go_to_previous_label(self):
         """Go to the previous label in the spectrogram."""
-        if self.predicted_labels is None or self.predicted_labels.empty:
+        if self.data.predicted_labels is None or self.data.predicted_labels.empty:
             self.status.emit("No labels available")
             return
         if self.current_label < 1:
@@ -178,10 +180,10 @@ class CurateWidget(QFrame):
 
     def go_to_next_label(self):
         """Go to the next label in the spectrogram."""
-        if self.predicted_labels is None or self.predicted_labels.empty:
+        if self.data.predicted_labels is None or self.data.predicted_labels.empty:
             self.status.emit("No labels available")
             return
-        if self.current_label >= len(self.predicted_labels) - 1:
+        if self.current_label >= len(self.data.predicted_labels) - 1:
             self.status.emit("Already at the last label")
             return
         self.current_label += 1
@@ -189,10 +191,10 @@ class CurateWidget(QFrame):
 
     def go_to_last_label(self):
         """Go to the last label in the spectrogram."""
-        if self.predicted_labels is None or self.predicted_labels.empty:
+        if self.data.predicted_labels is None or self.data.predicted_labels.empty:
             self.status.emit("No labels available")
             return
-        self.current_label = len(self.predicted_labels) - 1
+        self.current_label = len(self.data.predicted_labels) - 1
         self.go_to_label()
 
     def go_to_label(self):
