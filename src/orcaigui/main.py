@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 from orcaigui.about import AboutWindow
 from orcaigui.audio_file_loader import AudioFileLoader, SpectrogramProcessor
 from orcaigui.curate_widget import CurateWidget
-from orcaigui.dialogs import SaveLabelsAsDialog, ChannelSelectDialog
+from orcaigui.dialogs import ChannelSelectDialog
 from orcaigui.spectrogram_widget import SpectrogramWidget
 
 COLORMAPS = ["inferno", "viridis", "plasma", "magma", "cividis", "Greys"]
@@ -109,11 +109,6 @@ class MainWindow(QMainWindow):
         self.save_action.setShortcut(QKeySequence.StandardKey.Save)
         self.save_action.triggered.connect(self.save_labels)
         self.file_menu.addAction(self.save_action)
-
-        self.save_as_action = QAction("Save Labels as..", self)
-        self.save_as_action.setShortcut(QKeySequence.StandardKey.SaveAs)
-        self.save_as_action.triggered.connect(self.save_labels_as)
-        self.file_menu.addAction(self.save_as_action)
 
         self.exit_action = QAction("Exit", self)
         self.exit_action.setShortcut(QKeySequence.StandardKey.Quit)
@@ -302,8 +297,11 @@ class MainWindow(QMainWindow):
             self.status.showMessage("No labels to save")
             return
         if self.labels_path is None:
-            self.save_labels_as()
-            return
+            self.labels_path = str(
+                self.recording_path.with_name(
+                    f"{self.recording_path.stem}_c{self.channel}_calls.txt"
+                )
+            )
 
         save_predictions(
             predicted_labels=self.curate_widget.predicted_labels[
@@ -320,23 +318,7 @@ class MainWindow(QMainWindow):
                 "label_source",
             ],
         )
-
-    def save_labels_as(self):
-        """Save the current labels to a new file."""
-        if (
-            self.curate_widget.predicted_labels is None
-            or self.curate_widget.predicted_labels.empty
-        ):
-            self.status.showMessage("No labels to save")
-            return
-
-        save_as_dialog = SaveLabelsAsDialog(self)
-
-        if save_as_dialog.exec():
-            selected_files = save_as_dialog.selectedFiles()
-            if selected_files:
-                self.labels_path = Path(selected_files[0])
-                self.save_labels()
+        self.status.showMessage(f"Labels saved to {self.labels_path}")
 
 
 def predict_gui():

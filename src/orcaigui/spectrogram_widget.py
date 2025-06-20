@@ -1,18 +1,17 @@
 from pyqtgraph import (
     AxisItem,
+    BarGraphItem,
     GraphicsLayoutWidget,
     ImageItem,
     LegendItem,
-    PlotItem,
-    colormap,
-    mkPen,
-    mkBrush,
-    TextItem,
-    BarGraphItem,
-    intColor,
     LinearRegionItem,
+    PlotItem,
+    TextItem,
+    colormap,
+    intColor,
+    mkBrush,
+    mkPen,
 )
-
 
 from orcaigui.extensions import timedelta
 
