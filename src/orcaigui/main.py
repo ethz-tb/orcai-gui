@@ -22,6 +22,7 @@ from orcaigui.dialogs import (
     ChannelSelectDialog,
     ExportLabelsAsDialog,
     SaveProjectAsDialog,
+    LabelNameDialog,
 )
 from orcaigui.inspector import InspectorWindow
 from orcaigui.orcaidata import OrcaiData
@@ -80,9 +81,14 @@ class MainWindow(QMainWindow):
         self.curate_widget = CurateWidget(self)
         self.curate_widget.status.connect(self.status.showMessage)
         self.curate_widget.label.connect(self.spectrogram_widget.focus_on_label)
-        self.curate_widget.labels_updated.connect(
+        self.curate_widget.label_updated.connect(
             self.spectrogram_widget.update_prediction_label
         )
+
+        self.spectrogram_widget.clicked_label.connect(
+            self.curate_widget.go_to_label_by_index
+        )
+        self.spectrogram_widget.new_label.connect(self.create_new_label)
 
         splitter.addWidget(self.curate_widget)
 
@@ -185,6 +191,10 @@ class MainWindow(QMainWindow):
                 self.open_file(Path(selected_files[0]))
 
     def open_file(self, recording_path: Path):
+        if not recording_path.exists():
+            self.status.showMessage(f"File {recording_path} does not exist.")
+            self.remove_recent_file(recording_path)
+            return
         self.open_action.setEnabled(False)
         self.recent_files_menu.setEnabled(False)
         if recording_path.suffix == ".orcai":
@@ -318,6 +328,17 @@ class MainWindow(QMainWindow):
         settings.setValue("recentFiles", recent_files)
         self.update_open_recent_menu()
 
+    def remove_recent_file(self, file_path: Path):
+        """Remove a file from the recent files list."""
+        settings = QSettings()
+        recent_files = settings.value("recentFiles", [], type=list)
+        file_path = str(file_path)
+        if file_path in recent_files:
+            recent_files.remove(file_path)
+            print(f"Removed {file_path} from recent files")
+            settings.setValue("recentFiles", recent_files)
+            self.update_open_recent_menu()
+
     def save_project(self):
         """Save the current project."""
         if self.data is None:
@@ -328,8 +349,9 @@ class MainWindow(QMainWindow):
             self.save_project_as()
             return
 
-        self.data.save_to_hdf5_file(self.project_path)
+        self.data.save_as_hdf5(self.project_path)
         self.status.showMessage(f"Project saved to {self.project_path.name}")
+        self.update_recent_files(self.project_path)
         return
 
     def save_project_as(self):
@@ -340,6 +362,7 @@ class MainWindow(QMainWindow):
             if selected_files:
                 self.project_path = Path(selected_files[0])
                 self.save_project()
+
         return
 
     def export_labels(self):
@@ -364,6 +387,32 @@ class MainWindow(QMainWindow):
             return
         self.inspector_window.show()
         self.show_inspector_action.setText("Hide Inspector")
+
+    def create_new_label(self, x_pos: int):
+        """Create a new label at the specified x position."""
+        if self.data is None:
+            self.status.showMessage("No recording loaded")
+            return
+
+        label_name_dialog = LabelNameDialog(self.orcai_parameter["calls"], parent=self)
+        if label_name_dialog.exec():
+            label_name = label_name_dialog.label_name_input.text().strip()
+            if label_name not in self.orcai_parameter["calls"]:
+                self.orcai_parameter["calls"].append(label_name)
+        else:
+            self.status.showMessage(
+                "No label name given selected. Operation cancelled."
+            )
+            return
+        view_region = self.spectrogram_widget.navigation_region.getRegion()
+        extent = (view_region[1] - view_region[0]) // 10
+
+        self.curate_widget.create_new_label(
+            x_pos=x_pos,
+            extent=extent,
+            label_name=label_name,
+        )
+        self.spectrogram_widget.update_plots()
 
 
 def predict_gui():

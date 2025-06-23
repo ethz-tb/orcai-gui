@@ -1,4 +1,4 @@
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -16,7 +16,7 @@ class CurateWidget(QFrame):
 
     status = pyqtSignal(str)
     label = pyqtSignal(int)
-    labels_updated = pyqtSignal(bool, int)
+    label_updated = pyqtSignal(int, bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -143,7 +143,7 @@ class CurateWidget(QFrame):
             self.data.predicted_labels.loc[self.current_label, "label"].replace("*", "")
         )
 
-        self.labels_updated.emit(True, self.current_label)
+        self.label_updated.emit(self.current_label, False)
         self.status.emit("Label marked as correct")
         self.go_to_next_label()
 
@@ -155,7 +155,7 @@ class CurateWidget(QFrame):
         )
         self.data.predicted_labels.loc[self.current_label, "label_ok"] = False
         self.data.predicted_labels.loc[self.current_label, "label_ok"] = False
-        self.labels_updated.emit(False, self.current_label)
+        self.label_updated.emit(self.current_label, False)
         self.status.emit("Label marked as incorrect")
         self.go_to_next_label()
 
@@ -197,8 +197,41 @@ class CurateWidget(QFrame):
         self.current_label = len(self.data.predicted_labels) - 1
         self.go_to_label()
 
+    @pyqtSlot(int)
+    def go_to_label_by_index(self, index: int):
+        """Go to a specific label index."""
+        if self.data is None or self.data.predicted_labels.empty:
+            self.status.emit("No labels available")
+            return
+        if index < 0 or index >= len(self.data.predicted_labels):
+            self.status.emit("Index out of range")
+            return
+        self.current_label = index
+        self.go_to_label()
+
     def go_to_label(self):
         """Go to a specific label index."""
         self.label.emit(self.current_label)
         self.update_label_texts()
         self.update_buttons()
+
+    def create_new_label(
+        self, x_pos: int, extent: int = 2, label_name: str = "NEW_LABEL"
+    ):
+        if self.data is None:
+            self.status.emit("No data available to create a new label")
+            return
+
+        new_label = {
+            "start": max(0, x_pos - extent // 2),
+            "stop": min(x_pos + extent // 2, len(self.data.times)),
+            "label": label_name,
+            "label_checked": False,
+            "label_ok": False,
+            "label_source": f"manual:{self.username}",
+        }
+        self.data.predicted_labels.loc[len(self.data.predicted_labels)] = new_label
+        self.n_labels = len(self.data.predicted_labels)
+        self.current_label = self.n_labels - 1
+        print(self.data.predicted_labels)
+        self.go_to_label()

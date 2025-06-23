@@ -1,3 +1,5 @@
+import pandas as pd
+from PyQt6.QtCore import pyqtSignal, pyqtSlot
 from pyqtgraph import (
     AxisItem,
     BarGraphItem,
@@ -16,14 +18,98 @@ from pyqtgraph import (
 from orcaigui.extensions import timedelta
 from orcaigui.orcaidata import OrcaiData
 
+CORRECT_PEN_COLOR = (0, 255, 0, int(0.7 * 255))
+WRONG_PEN_COLOR = (200, 200, 200, int(0.5 * 255))
+WRONG_BRUSH_COLOR = (100, 100, 100, int(0.5 * 255))
 
-class TextItem(TextItem):
-    """Extend TextItem with setOpts function to unify interface with BarGraphItem."""
 
-    def setOpts(self, **opts):
-        """Set options for the TextItem."""
-        if "text_color" in opts:
-            self.setColor(opts["text_color"])
+def _get_call_color(call: str, calls: list[str], alpha: float = 1):
+    call = call.replace("*", "")
+    i = calls.index(call)
+    if alpha < 0:
+        alpha = 0
+    if alpha > 1:
+        alpha = 255
+    else:
+        alpha = 255 * alpha
+
+    return intColor(i, alpha=int(alpha), hues=len(calls))
+
+
+class LabelTextItem(TextItem):
+    def __init__(self, label, calls):
+        self.calls = calls
+        if not label.label_checked:
+            color = _get_call_color(label.label, self.calls, alpha=0.7)
+        else:
+            if label.label_ok:
+                color = _get_call_color(label.label, self.calls, alpha=0.7)
+            else:
+                color = WRONG_PEN_COLOR
+        super().__init__(
+            text=label.label,
+            color=color,
+            anchor=(0.5, 0.5),
+        )
+        self.setObjectName(str(label.Index))
+
+    def update_item(self, label, update_extent: bool = False):
+        if not label.label_checked:
+            self.setColor(_get_call_color(label.label, self.calls, alpha=0.7))
+        else:
+            if label.label_ok:
+                self.setColor(_get_call_color(label.label, self.calls, alpha=0.7))
+            else:
+                self.setColor(WRONG_PEN_COLOR)
+        if update_extent:
+            self.setPos((label.start + label.stop) / 2, 0.5)
+
+
+class LabelItem(BarGraphItem):
+    def __init__(self, label, calls):
+        self.calls = calls
+        if not label.label_checked:
+            brush = mkBrush(
+                _get_call_color(label.label, calls=self.calls, alpha=0.3),
+            )
+            pen = mkPen(_get_call_color(label.label, calls=self.calls, alpha=0.7))
+        else:
+            if label.label_ok:
+                brush = mkBrush(
+                    _get_call_color(label.label, calls=self.calls, alpha=0.3),
+                )
+                pen = mkPen(CORRECT_PEN_COLOR, width=2)
+            else:
+                brush = mkBrush(WRONG_BRUSH_COLOR)
+                pen = mkPen(WRONG_PEN_COLOR)
+        super().__init__(
+            x0=label.start, x1=label.stop, y0=0.25, y1=0.75, brush=brush, pen=pen
+        )
+        self.setObjectName(str(label.Index))
+
+    def update_item(self, label, update_extent: bool = False):
+        if not label.label_checked:
+            self.setOpts(
+                brush=mkBrush(
+                    _get_call_color(label.label, self.calls, alpha=0.3),
+                ),
+                pen=mkPen(_get_call_color(label.label, self.calls, alpha=0.7)),
+            )
+        else:
+            if label.label_ok:
+                self.setOpts(
+                    brush=mkBrush(
+                        _get_call_color(label.label, self.calls, alpha=0.3),
+                    ),
+                    pen=mkPen(CORRECT_PEN_COLOR, width=2),
+                )
+            else:
+                self.setOpts(
+                    brush=mkBrush(WRONG_BRUSH_COLOR),
+                    pen=mkPen(WRONG_PEN_COLOR),
+                )
+        if update_extent:
+            self.setOpts(x0=label.start, x1=label.stop)
 
 
 class DurationAxisItem(AxisItem):
@@ -89,6 +175,7 @@ class TimePlot(PlotItem):
         self.setMouseEnabled(x=False, y=False)
         self.setLimits(xMin=0)
         self.hideButtons()
+        self.setMenuEnabled(False)
         if hide_y_axis:
             self.hideAxis("bottom")
         if max_height is not None:
@@ -110,11 +197,15 @@ class NavigationPlot(PlotItem):
         self.setMaximumHeight(max_height)
         self.setMouseEnabled(x=False, y=False)
         self.getViewBox().setBackgroundColor(background_color)
+        self.setMenuEnabled(False)
         self.hideButtons()
 
 
 class SpectrogramWidget(GraphicsLayoutWidget):
     """A custom plot widget showing the spectrogram and predictions."""
+
+    clicked_label = pyqtSignal(int)
+    new_label = pyqtSignal(int)
 
     def __init__(
         self,
@@ -247,44 +338,17 @@ class SpectrogramWidget(GraphicsLayoutWidget):
             self.prediction_plot.plot(
                 x=self.data.prediction_times,
                 y=self.data.aggregated_predictions[:, i],
-                pen=mkPen(
-                    self._get_call_color(call),
-                ),
+                pen=mkPen(_get_call_color(call, self.calls)),
                 name=self.calls[i],
             )
             self.prediction_legend.addItem(self.prediction_plot.items[-1], call)
 
         for label in self.data.predicted_labels.itertuples():
-            prediction_bgitem = BarGraphItem(
-                x0=label.start,
-                x1=label.stop,
-                y0=0.25,
-                y1=0.75,
-                brush=mkBrush(
-                    self._get_call_color(label.label, alpha=0.3),
-                ),
-                pen=mkPen(self._get_call_color(label.label, alpha=0.7)),
-            )
-            prediction_bgitem.setObjectName(str(label.Index))
+            prediction_bgitem = LabelItem(label, calls=self.calls)
             # Can't use same item (and .copy() doesn't work)
-            navigation_bgitem = BarGraphItem(
-                x0=label.start,
-                x1=label.stop,
-                y0=0.25,
-                y1=0.75,
-                brush=mkBrush(
-                    self._get_call_color(label.label, alpha=0.3),
-                ),
-                pen=mkPen(self._get_call_color(label.label, alpha=0.7)),
-            )
-            navigation_bgitem.setObjectName(str(label.Index))
+            navigation_bgitem = LabelItem(label, calls=self.calls)
 
-            call_label = TextItem(
-                text=label.label,
-                color=self._get_call_color(label.label, alpha=0.7),
-                anchor=(0.5, 0.5),
-            )
-            call_label.setObjectName(str(label.Index))
+            call_label = LabelTextItem(label, calls=self.calls)
             self.prediction_plot.addItem(prediction_bgitem)
             self.navigation_plot.addItem(navigation_bgitem)
             self.prediction_plot.addItem(call_label)
@@ -295,41 +359,57 @@ class SpectrogramWidget(GraphicsLayoutWidget):
         self.prediction_plot.setLimits(xMin=0, xMax=self.plot_x_max)
         self.prediction_plot.setRange(xRange=self.plot_x_range)
         self.prediction_plot.showGrid(x=True, y=True)
+        self.prediction_plot.scene().sigMouseClicked.connect(
+            self.mouse_clicked_prediction_plot
+        )
 
-    def update_prediction_label(self, label_ok: bool, label_index: int):
+    def mouse_clicked_prediction_plot(self, ev):
+        if not ev.double():
+            return
+        if self.data is None:
+            return
+
+        pos = self.prediction_plot.vb.mapSceneToView(ev.scenePos())
+        print(f"double-clicked at {pos.x()}, {pos.y()}")
+        if pos.x() < 0 or pos.x() > self.plot_x_max:
+            return
+        if pos.y() < 0 or pos.y() > 1:
+            return
+
+        # Check if a label was clicked
+        near_bg_items = [
+            x
+            for x in self.prediction_plot.scene().itemsNearEvent(ev)
+            if isinstance(x, BarGraphItem)
+        ]
+        if len(near_bg_items) > 0:
+            label_index = int(near_bg_items[0].objectName())
+            self.clicked_label.emit(label_index)
+            return
+        else:
+            start = int(pos.x())
+            self.new_label.emit(start)
+
+    @pyqtSlot(int, bool)
+    def update_prediction_label(
+        self,
+        label_index: int,
+        update_extent: bool = False,
+    ):
         label = self.data.predicted_labels.iloc[label_index]
+
         prediction_plot_items = [
             x for x in self.prediction_plot.items if x.objectName() == str(label_index)
         ]
         navigation_plot_items = [
             x for x in self.navigation_plot.items if x.objectName() == str(label_index)
         ]
-        if label_ok:
-            prediction_plot_brush = mkBrush(
-                self._get_call_color(label.label, alpha=0.3)
-            )
-            prediction_plot_pen = mkPen((0, 255, 0, 200), width=2)
-            prediction_plot_text_color = self._get_call_color(label.label, alpha=0.7)
-            navigation_plot_brush = prediction_plot_brush
-            navigation_plot_pen = mkPen(self._get_call_color(label.label, alpha=0.7))
-        else:
-            prediction_plot_brush = (100, 100, 100, int(0.5 * 255))
-            prediction_plot_pen = (200, 200, 200, int(0.5 * 255))
-            prediction_plot_text_color = prediction_plot_pen
-            navigation_plot_brush = prediction_plot_brush
-            navigation_plot_pen = prediction_plot_pen
 
         for item in prediction_plot_items:
-            item.setOpts(
-                brush=prediction_plot_brush,
-                pen=prediction_plot_pen,
-                text_color=prediction_plot_text_color,
-            )
+            item.update_item(label, update_extent=update_extent)
+
         for item in navigation_plot_items:
-            item.setOpts(
-                brush=navigation_plot_brush,
-                pen=navigation_plot_pen,
-            )
+            item.update_item(label, update_extent=update_extent)
 
     def update_plot_region(self, region):
         region = self.navigation_region.getRegion()
@@ -347,6 +427,7 @@ class SpectrogramWidget(GraphicsLayoutWidget):
 
         self.spectrogram_image.setLookupTable(lut)
 
+    @pyqtSlot(int)
     def focus_on_label(self, label_index):
         """Focus on a specific label in the spectrogram."""
 
@@ -359,14 +440,23 @@ class SpectrogramWidget(GraphicsLayoutWidget):
 
         self.navigation_region.setRegion([start - extra, stop + extra])
 
-    def _get_call_color(self, call: str, alpha: float = 1):
-        call = call.replace("*", "")
-        i = self.calls.index(call)
-        if alpha < 0:
-            alpha = 0
-        if alpha > 1:
-            alpha = 255
-        else:
-            alpha = 255 * alpha
+        # add roi region to spectrogram plot
+        if hasattr(self, "label_adjust_region"):
+            self.spectrogram_plot.removeItem(self.label_adjust_region)
+        self.label_adjust_region = LinearRegionItem(
+            values=[start, stop],
+            bounds=[0, self.plot_x_max],
+            brush=mkBrush(255, 255, 255, 50),
+            movable=True,
+        )
+        self.label_adjust_region.sigRegionChangeFinished.connect(self.adjust_label)
+        self.current_label = label_index
+        self.spectrogram_plot.addItem(self.label_adjust_region)
 
-        return intColor(i, alpha=int(alpha), hues=len(self.calls))
+    @pyqtSlot()
+    def adjust_label(self):
+        region = self.label_adjust_region.getRegion()
+        self.data.predicted_labels.loc[self.current_label, "start"] = int(region[0])
+        self.data.predicted_labels.loc[self.current_label, "stop"] = int(region[1])
+        self.update_prediction_label(self.current_label, update_extent=True)
+        return
