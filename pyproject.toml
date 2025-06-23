@@ -19,6 +19,7 @@ requires-python = "==3.11.*"
 license = "CC-BY-SA-4.0"
 license-files = ["LICENSE"]
 dependencies = [
+    "h5py>=3.14.0",
     "matplotlib>=3.10.3",
     "orcai",
     "pyqt6>=6.9.1",
@@ -40,7 +41,7 @@ orcui = "orcaigui.cli:cli"
 
 [tool.uv.sources]
 pyqtgraph = { git = "https://github.com/pyqtgraph/pyqtgraph" }
-orcai = { git = "https://github.com/ethz-tb/orcAI", rev = "dev" }
+orcai = { path = "../orcai" }
 
 [dependency-groups]
 dev = [

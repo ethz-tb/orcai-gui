@@ -902,8 +902,7 @@ wheels = [
 
 [[package]]
 name = "orcai"
-version = "1.0.4.dev4"
-source = { git = "https://github.com/ethz-tb/orcAI?rev=dev#b9fb6dcc178edca079f7d9baa5f3c287b90b7bfa" }
+source = { directory = "../orcai" }
 dependencies = [
     { name = "humanize" },
     { name = "keras" },
@@ -920,10 +919,31 @@ dependencies = [
     { name = "zarr" },
 ]
 
+[package.metadata]
+requires-dist = [
+    { name = "humanize", specifier = ">=4,<5" },
+    { name = "keras", specifier = ">=3,<4" },
+    { name = "keras-tuner", specifier = ">=1,<2" },
+    { name = "librosa", specifier = "<1" },
+    { name = "numpy", specifier = ">=2,<3" },
+    { name = "pandas", specifier = ">=2,<3" },
+    { name = "psutil", specifier = ">=7,<8" },
+    { name = "rich-click", specifier = ">=1,<2" },
+    { name = "tensorflow", marker = "sys_platform == 'darwin'", specifier = ">=2,<3" },
+    { name = "tensorflow", extras = ["and-cuda"], marker = "sys_platform != 'darwin'", specifier = ">=2,<3" },
+    { name = "tensorrt", marker = "sys_platform != 'darwin'", specifier = ">=10,<11" },
+    { name = "tqdm", specifier = ">=4.42.0,<5" },
+    { name = "zarr", specifier = ">=3,<4" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "ipython", specifier = ">=9.2.0" }]
+
 [[package]]
 name = "orcaigui"
 source = { editable = "." }
 dependencies = [
+    { name = "h5py" },
     { name = "matplotlib" },
     { name = "orcai" },
     { name = "pyqt6" },
@@ -939,8 +959,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "h5py", specifier = ">=3.14.0" },
     { name = "matplotlib", specifier = ">=3.10.3" },
-    { name = "orcai", git = "https://github.com/ethz-tb/orcAI?rev=dev" },
+    { name = "orcai", directory = "../orcai" },
     { name = "pyqt6", specifier = ">=6.9.1" },
     { name = "pyqtgraph", git = "https://github.com/pyqtgraph/pyqtgraph" },
 ]

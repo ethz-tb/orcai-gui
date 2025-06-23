@@ -49,11 +49,12 @@ class ExportLabelsAsDialog(QFileDialog):
         self.selectFile(str(default_labels_path))
 
 
-class ExportProjectAsDialog(QFileDialog):
+class SaveProjectAsDialog(QFileDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Export Project as")
         self.setFileMode(QFileDialog.FileMode.AnyFile)
         self.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
-        self.setNameFilter("orcai project files (*.orcai)")
-        self.setDefaultSuffix("orcai")
+        self.setNameFilter("orcai project files (*.hdf5.orcai)")
+        self.setDefaultSuffix(".hdf5.orcai")
+        self.selectFile(str(parent.recording_path.with_suffix(".hdf5.orcai")))

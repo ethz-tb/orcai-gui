@@ -22,11 +22,11 @@ class AboutWindow(QWidget):
         )
         self.logo.setPixmap(logo)
         self.logo.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        self.about_text = QLabel(
-            "orcAI GUI v0.1.0\n\nDeveloped by\nClaude Sonnet 4\nGPT-4o\nand\nDaniel"
-        )
+        self.about_text = QLabel("orcAI GUI v0.1.0\n\nDeveloped by\nDaniel Angst")
         self.about_text.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
         layout.addWidget(self.logo)
         layout.addWidget(self.about_text)
         self.setLayout(layout)
+        self.setWindowTitle("About orcAI")
+        self.resize(300, 200)

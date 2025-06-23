@@ -297,7 +297,6 @@ class SpectrogramWidget(GraphicsLayoutWidget):
         self.prediction_plot.showGrid(x=True, y=True)
 
     def update_prediction_label(self, label_ok: bool, label_index: int):
-        print(self.data.predicted_labels.to_numpy())
         label = self.data.predicted_labels.iloc[label_index]
         prediction_plot_items = [
             x for x in self.prediction_plot.items if x.objectName() == str(label_index)
@@ -341,7 +340,7 @@ class SpectrogramWidget(GraphicsLayoutWidget):
         """Set the colormap for the spectrogram."""
         if colormap_name == self.colormap_name:
             return
-        if self.spectrogram is None:
+        if self.data.spectrogram is None:
             return
         self.colormap_name = colormap_name
         lut = colormap.get(self.colormap_name, source="matplotlib").getLookupTable()

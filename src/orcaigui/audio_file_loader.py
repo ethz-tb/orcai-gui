@@ -113,7 +113,9 @@ class SpectrogramProcessor(QRunnable):
         self.model = model
 
     def run(self):
-        self.signals.progress.emit("(2/5) Calculating spectrogram...")
+        self.signals.progress.emit(
+            f"(2/5) Calculating spectrogram for {self.recording_path.name}..."
+        )
         try:
             spectrogram, frequencies, times = calculate_spectrogram(
                 self.wav_file,
@@ -125,7 +127,9 @@ class SpectrogramProcessor(QRunnable):
             self.signals.error.emit((type(e), e))
             return
 
-        self.signals.progress.emit("(3/5) Preprocessing spectrogram...")
+        self.signals.progress.emit(
+            f"(3/5) Preprocessing spectrogram for {self.recording_path.name}..."
+        )
 
         try:
             pp_spectrogram = preprocess_spectrogram(
@@ -136,7 +140,9 @@ class SpectrogramProcessor(QRunnable):
             self.signals.error.emit((type(e), e))
             return
 
-        self.signals.progress.emit("(4/5) Computing predictions...")
+        self.signals.progress.emit(
+            f"(4/5) Computing predictions for {self.recording_path.name}..."
+        )
         try:
             aggregated_predictions, overlap_count = compute_aggregated_predictions(
                 recording_path=self.recording_path,
@@ -154,7 +160,9 @@ class SpectrogramProcessor(QRunnable):
             self.signals.error.emit((type(e), e))
             return
 
-        self.signals.progress.emit("5/5 Computing labels...")
+        self.signals.progress.emit(
+            f"5/5 Computing labels for {self.recording_path.name}..."
+        )
         try:
             row_starts, row_stops, label_names = compute_binary_predictions(
                 aggregated_predictions=aggregated_predictions,

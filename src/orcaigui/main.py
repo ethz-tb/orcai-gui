@@ -3,9 +3,7 @@ from getpass import getuser
 from importlib.resources import files
 from pathlib import Path
 
-import pandas as pd
 from orcAI.io import load_orcai_model
-from orcAI.predict import save_predictions
 from PyQt6.QtCore import QSettings, Qt, QThreadPool, pyqtSlot
 from PyQt6.QtGui import QAction, QActionGroup, QIcon, QKeySequence
 from PyQt6.QtWidgets import (
@@ -23,9 +21,11 @@ from orcaigui.curate_widget import CurateWidget
 from orcaigui.dialogs import (
     ChannelSelectDialog,
     ExportLabelsAsDialog,
-    ExportProjectAsDialog,
+    SaveProjectAsDialog,
 )
 from orcaigui.spectrogram_widget import SpectrogramWidget
+from orcaigui.orcaidata import OrcaiData
+from orcaigui.inspector import InspectorWindow
 
 COLORMAPS = ["inferno", "viridis", "plasma", "magma", "cividis", "Greys"]
 N_RECENT_FILES = 5
@@ -43,8 +43,9 @@ class MainWindow(QMainWindow):
 
         self.spectrogram_parameter = self.orcai_parameter["spectrogram"]
         self.data = None
+        self.project_path = None
 
-        self.channel = 1
+        self.inspector_window = InspectorWindow(self.data)
 
         settings = QSettings()
         self.colormap_name = settings.value("colormap", defaultValue="Greys", type=str)
@@ -144,6 +145,13 @@ class MainWindow(QMainWindow):
             if colormap == self.colormap_name:
                 action.setChecked(True)
 
+        # Tools menu
+        self.tools_menu = self.menu.addMenu("Tools")
+        self.show_inspector_action = QAction("Show Inspector", self)
+        self.show_inspector_action.setShortcut(QKeySequence("Ctrl+I"))
+        self.show_inspector_action.triggered.connect(self.toggle_inspector_window)
+        self.tools_menu.addAction(self.show_inspector_action)
+
         # Help menu
         self.help_menu = self.menu.addMenu("Help")
         self.about_action = QAction("About orcAI", self)
@@ -160,8 +168,6 @@ class MainWindow(QMainWindow):
     def show_about_window(self):
         """Show the about window."""
         self.about_window = AboutWindow()
-        self.about_window.setWindowTitle("About orcAI")
-        self.about_window.resize(300, 200)
         self.about_window.show()
 
     def open_file_dialog(self):
@@ -170,7 +176,7 @@ class MainWindow(QMainWindow):
         file_dialog.setWindowTitle("Open Audio Recording or Prokect")
         file_dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
         file_dialog.setNameFilter(
-            "WAV Files (*.wav);; OrcAI Project Files (*.hdf5.orcai)"
+            "WAV Files or OrcAI Project Files (*.wav *.hdf5.orcai)"
         )
 
         if file_dialog.exec():
@@ -181,17 +187,21 @@ class MainWindow(QMainWindow):
     def open_file(self, recording_path: Path):
         self.open_action.setEnabled(False)
         self.recent_files_menu.setEnabled(False)
-        if recording_path.suffix == ".hdf5.orcai":
-            return
+        if recording_path.suffix == ".orcai":
+            results = OrcaiData.load_from_hdf5_file(recording_path)
+            self.project_path = recording_path
+            self.status.showMessage(f"Project loaded from {recording_path.name}")
+            self.spectrogram_processed(results)
         if recording_path.suffix == ".wav":
-            audioFileLoader = AudioFileLoader(
+            self.project_path = None
+            file_loader = AudioFileLoader(
                 recording_path=recording_path,
                 sampling_rate=self.spectrogram_parameter["sampling_rate"],
             )
-            audioFileLoader.signals.result.connect(self.audio_file_loaded)
-            audioFileLoader.signals.error.connect(self.audio_file_load_error)
-            audioFileLoader.signals.progress.connect(self.update_progress)
-            self.threadpool.start(audioFileLoader)
+            file_loader.signals.result.connect(self.audio_file_loaded)
+            file_loader.signals.error.connect(self.audio_file_load_error)
+            file_loader.signals.progress.connect(self.update_progress)
+            self.threadpool.start(file_loader)
 
     @pyqtSlot(str)
     def update_progress(self, message):
@@ -208,34 +218,24 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(dict)
     def audio_file_loaded(self, results):
-        if "error" in results:
-            (error_type, error_value) = results["error"]
-            print(error_type, error_value)
-            self.status.showMessage(f"Error loading audio file: {error_value}")
-            return
-
         wav_file = results["wav_file"]
         n_channels = results["n_channels"]
         self.recording_path = results["recording_path"]
-        self.default_labels_path = self.recording_path.with_name(
-            f"{self.recording_path.stem}_c{self.channel}_calls.txt"
-        )
 
         if n_channels > 1:
             channel_select_dialog = ChannelSelectDialog(n_channels)
             if channel_select_dialog.exec():
-                self.channel = (
-                    channel_select_dialog.channel_select_box.currentIndex() + 1
-                )
+                channel = channel_select_dialog.channel_select_box.currentIndex() + 1
             else:
                 self.status.showMessage("No channel selected. Operation cancelled.")
                 return
         else:
-            self.channel = 1
+            channel = 1
+
         spectrogram_processor = SpectrogramProcessor(
             wav_file=wav_file,
             recording_path=self.recording_path,
-            channel=self.channel,
+            channel=channel,
             orcai_parameter=self.orcai_parameter,
             model=self.model,
             shape=self.shape,
@@ -248,12 +248,15 @@ class MainWindow(QMainWindow):
     @pyqtSlot(dict)
     def spectrogram_processed(self, results):
         self.data = results
-
         self.curate_widget.update_data(self.data)
-
         self.spectrogram_widget.update_data(
             self.data,
             colormap_name=self.colormap_name,
+        )
+        self.inspector_window.update_data(self.data)
+
+        self.default_labels_path = self.data.recording_path.with_name(
+            f"{self.data.recording_path.stem}_c{self.data.channel}_calls.txt"
         )
 
         self.setWindowTitle(
@@ -261,7 +264,10 @@ class MainWindow(QMainWindow):
         )
         self.open_action.setEnabled(True)
         self.recent_files_menu.setEnabled(True)
-        self.update_recent_files(self.data.recording_path)
+        if self.project_path is None:
+            self.update_recent_files(self.data.recording_path)
+        else:
+            self.update_recent_files(self.project_path)
 
     @pyqtSlot(tuple)
     def spectrogram_processing_error(self, error):
@@ -314,7 +320,7 @@ class MainWindow(QMainWindow):
 
     def save_project(self):
         """Save the current project."""
-        if self.recording_path is None:
+        if self.data is None:
             self.status.showMessage("No recording loaded")
             return
 
@@ -322,25 +328,22 @@ class MainWindow(QMainWindow):
             self.save_project_as()
             return
 
-        print("Saving project... not implemented yet")
+        self.data.save_to_hdf5_file(self.project_path)
+        self.status.showMessage(f"Project saved to {self.project_path.name}")
         return
 
     def save_project_as(self):
-        export_labels_dialog = ExportProjectAsDialog(parent=self)
+        save_project_as_dialog = SaveProjectAsDialog(parent=self)
 
-        if export_labels_dialog.exec():
-            selected_files = export_labels_dialog.selectedFiles()
+        if save_project_as_dialog.exec():
+            selected_files = save_project_as_dialog.selectedFiles()
             if selected_files:
                 self.project_path = Path(selected_files[0])
                 self.save_project()
         return
 
     def export_labels(self):
-        """Save the current labels to a new file."""
-        if (
-            self.curate_widget.predicted_labels is None
-            or self.curate_widget.predicted_labels.empty
-        ):
+        if self.data is None:
             self.status.showMessage("No labels to save")
             return
 
@@ -352,21 +355,15 @@ class MainWindow(QMainWindow):
             selected_files = export_labels_dialog.selectedFiles()
             if selected_files:
                 self.labels_path = Path(selected_files[0])
-                save_predictions(
-                    predicted_labels=self.curate_widget.predicted_labels[
-                        self.curate_widget.predicted_labels["label_ok"] == True  # noqa: E712
-                    ],
-                    output_path=self.labels_path,
-                    delta_t=self.times[1] - self.times[0],
-                    columns=[
-                        "start",
-                        "stop",
-                        "label",
-                        "label_checked",
-                        "label_ok",
-                        "label_source",
-                    ],
-                )
+                self.data.export_labels_as_tsv(self.labels_path)
+
+    def toggle_inspector_window(self):
+        if self.inspector_window.isVisible():
+            self.inspector_window.hide()
+            self.show_inspector_action.setText("Show Inspector")
+            return
+        self.inspector_window.show()
+        self.show_inspector_action.setText("Hide Inspector")
 
 
 def predict_gui():
