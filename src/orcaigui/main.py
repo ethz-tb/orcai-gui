@@ -23,9 +23,9 @@ from orcaigui.dialogs import (
     ExportLabelsAsDialog,
     SaveProjectAsDialog,
 )
-from orcaigui.spectrogram_widget import SpectrogramWidget
-from orcaigui.orcaidata import OrcaiData
 from orcaigui.inspector import InspectorWindow
+from orcaigui.orcaidata import OrcaiData
+from orcaigui.spectrogram_widget import SpectrogramWidget
 
 COLORMAPS = ["inferno", "viridis", "plasma", "magma", "cividis", "Greys"]
 N_RECENT_FILES = 5

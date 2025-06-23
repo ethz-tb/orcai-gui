@@ -1,10 +1,10 @@
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QHBoxLayout,
     QLabel,
     QVBoxLayout,
-    QHBoxLayout,
     QWidget,
 )
-from PyQt6.QtCore import Qt
 
 
 class infoWidget(QWidget):
